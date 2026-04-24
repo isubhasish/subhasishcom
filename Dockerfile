@@ -1,19 +1,16 @@
-FROM ubuntu:20.04
- 
- 
-RUN mkdir /app
-RUN chmod 777 /app
+FROM python:3.10-slim
+
+# Install FFmpeg and system dependencies
+RUN apt-get update && apt-get install -y ffmpeg git && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /app
- 
-RUN apt -qq update
- 
-ENV DEBIAN_FRONTEND=noninteractive
-ENV TZ=Asia/Kolkata
- 
- 
-RUN apt -qq install -y git wget curl busybox  python3 ffmpeg python3-pip
- 
+
+# Copy the requirements and install them
 COPY requirements.txt .
 RUN pip3 install --no-cache-dir -r requirements.txt
+
+# Copy your bot script into the container
 COPY . .
-CMD ["bash","start.sh"]
+
+# Run the bot
+CMD ["python3", "bot.py"]
