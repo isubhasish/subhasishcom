@@ -1,0 +1,10 @@
+aiohttp[speedups]  
+dnspython  
+hachoir  
+https://github.com/isubhasish/aiofilesencode/archive/master.zip  
+kurirogram  
+motor  
+Pillow  
+psutil  
+pytz  
+TgCrypto-pyrofork
