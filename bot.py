@@ -4,13 +4,14 @@ import asyncio
 import logging
 import time
 import re
+import math
 from pyrogram import Client, filters
 from pyrogram.types import Message
 import yt_dlp
 
 # --- GLOBALS & TRACKERS ---
 START_TIME = time.time()
-current_process = None  # Tracks the active FFmpeg task for the /cancel command
+current_process = None  
 
 # --- LOGGING SETUP ---
 logging.basicConfig(
@@ -24,7 +25,6 @@ logger = logging.getLogger(__name__)
 API_ID = 1234567     # Replace with your actual API ID
 API_HASH = "your_api_hash" # Replace with your actual API HASH
 
-# This logs you in as a User to unlock the 4GB limit
 app = Client("subhasish_compressor", api_id=API_ID, api_hash=API_HASH)
 queue = asyncio.Queue()
 
@@ -35,6 +35,48 @@ settings = {
     "audio": "libopus -b:a 160k -vbr on",  
     "preset": "medium"  
 }
+
+# --- PROGRESS BAR HELPERS ---
+def humanbytes(size):
+    if not size: return "0 B"
+    power = 2**10
+    n = 0
+    Dic_powerN = {0: 'B', 1: 'KB', 2: 'MB', 3: 'GB', 4: 'TB'}
+    while size > power:
+        size /= power
+        n += 1
+    return f"{round(size, 2)} {Dic_powerN[n]}"
+
+def time_formatter(milliseconds):
+    seconds, milliseconds = divmod(int(milliseconds), 1000)
+    minutes, seconds = divmod(seconds, 60)
+    hours, minutes = divmod(minutes, 60)
+    return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+
+def make_bar(percent):
+    filled = int(percent / 5)
+    return "█" * filled + "░" * (20 - filled)
+
+async def progress_for_pyrogram(current, total, ud_type, message, start_time, last_update_time):
+    if time.time() - last_update_time[0] > 3: # Update every 3 seconds
+        now = time.time()
+        diff = now - start_time
+        speed = current / diff if diff > 0 else 0
+        eta = (total - current) / speed if speed > 0 else 0
+        percent = (current / total) * 100 if total > 0 else 0
+        
+        text = (
+            f"{ud_type}\n"
+            f"[{make_bar(percent)}] `{percent:.1f}%`\n\n"
+            f"📦 **Size:** `{humanbytes(current)} / {humanbytes(total)}`\n"
+            f"🚀 **Speed:** `{humanbytes(speed)}/s`\n"
+            f"⏱ **ETA:** `{time_formatter(eta * 1000)}`"
+        )
+        try:
+            await message.edit(text)
+            last_update_time[0] = now
+        except:
+            pass
 
 # --- UTILITY COMMANDS ---
 @app.on_message(filters.command("start") & (filters.me | filters.chat("YOUR_GROUP_ID_HERE")))
@@ -67,7 +109,7 @@ async def restart_cmd(client, message):
 async def cancel_cmd(client, message):
     global current_process
     if current_process:
-        current_process.terminate()  # Kills the active FFmpeg process instantly
+        current_process.terminate()  
         await message.reply("🛑 **Task Cancelled.** Moving to next in queue...")
         current_process = None
     else:
@@ -163,16 +205,13 @@ async def process_video(message, input_path):
     global current_process
     output_path = f"compressed_{os.path.basename(input_path)}"
     
-    # Must use .mkv for Opus audio compatibility
     if not output_path.endswith('.mkv'):
          output_path = output_path.rsplit('.', 1)[0] + '.mkv'
 
-    status_msg = await message.reply(f"⚙️ Compressing (CRF {settings['crf']}, {settings['preset']})...")
+    status_msg = await message.reply("⚙️ **Preparing Compression...**")
     logger.info(f"FFmpeg running for HEVC: {input_path}")
 
-scale_val = f"scale={settings['resolution']}" if "x" in str(settings['resolution']) else f"scale=-2:{settings['resolution']}"
-    
-    # We add .split() to safely break apart the Opus settings!
+    scale_val = f"scale={settings['resolution']}" if "x" in str(settings['resolution']) else f"scale=-2:{settings['resolution']}"
     audio_args = settings["audio"].split()
     
     cmd = [
@@ -192,84 +231,103 @@ scale_val = f"scale={settings['resolution']}" if "x" in str(settings['resolution
         stderr=asyncio.subprocess.PIPE
     )
     
-    current_process = process # Set global for /cancel command
+    current_process = process 
     
-    # --- LIVE TIMER DISPLAY ---
+    # --- LIVE FFMPEG PROGRESS TRACKER ---
     last_update_time = time.time()
+    duration_sec = 0
+    start_time = time.time()
+
     while True:
         line = await process.stderr.readline()
         if not line:
             break
         line_str = line.decode('utf-8', errors='ignore').strip()
         
+        # Get total duration to calculate ETA
+        if not duration_sec and "Duration:" in line_str:
+            match = re.search(r"Duration:\s*(\d{2}):(\d{2}):(\d{2})", line_str)
+            if match:
+                duration_sec = int(match.group(1))*3600 + int(match.group(2))*60 + int(match.group(3))
+
         if "time=" in line_str:
-            time_match = re.search(r"time=(\d{2}:\d{2}:\d{2})", line_str)
-            # Update message every 5 seconds to avoid Telegram rate limits
+            time_match = re.search(r"time=(\d{2}):(\d{2}):(\d{2})", line_str)
             if time_match and (time.time() - last_update_time > 5):
-                try:
-                    await status_msg.edit(
-                        f"⚙️ **Compressing...**\n"
-                        f"⏱ **Time Encoded:** `{time_match.group(1)}`\n"
+                curr_sec = int(time_match.group(1))*3600 + int(time_match.group(2))*60 + int(time_match.group(3))
+                
+                if duration_sec > 0:
+                    percent = (curr_sec / duration_sec) * 100
+                    elapsed = time.time() - start_time
+                    speed = curr_sec / elapsed if elapsed > 0 else 0
+                    eta = (duration_sec - curr_sec) / speed if speed > 0 else 0
+                    
+                    text = (
+                        f"⚙️ **Processing Video**\n"
+                        f"[{make_bar(percent)}] `{percent:.1f}%`\n\n"
+                        f"⏱ **Time:** `{time_match.group(1)} / {time_formatter(duration_sec*1000)}`\n"
+                        f"⏳ **ETA:** `{time_formatter(eta*1000)}`\n"
                         f"*(CRF {settings['crf']}, {settings['preset']})*\n\n"
-                        f"💡 *Type /cancel to stop this task.*"
+                        f"💡 *Type /cancel to stop.*"
                     )
+                else:
+                    text = f"⚙️ **Processing Video...**\n⏱ **Time Encoded:** `{time_match.group(1)}`\n💡 *Type /cancel to stop.*"
+
+                try:
+                    await status_msg.edit(text)
                     last_update_time = time.time()
                 except:
                     pass
 
     await process.wait()
-    
-    if current_process == process:
-        current_process = None
+    if current_process == process: current_process = None
 
     if process.returncode != 0:
         logger.warning("Compression cancelled or crashed.")
-        if os.path.exists(output_path):
-            os.remove(output_path) 
-        try:
-            await status_msg.edit("🛑 **Task Cancelled or Failed.**")
-        except:
-            pass
+        if os.path.exists(output_path): os.remove(output_path) 
+        try: await status_msg.edit("🛑 **Task Cancelled or Failed.**")
+        except: pass
         return 
 
+    # --- UPLOAD WITH PROGRESS BAR ---
     if os.path.exists(output_path):
         logger.info("Uploading compressed file...")
-        await status_msg.edit("☁️ **Upload in progress...**")
-        await message.reply_video(output_path, caption="✅ Compressed Successfully!")
+        upload_start = time.time()
+        last_up_time = [time.time()]
+        
+        await message.reply_video(
+            output_path, 
+            caption="✅ Compressed Successfully!",
+            progress=progress_for_pyrogram,
+            progress_args=("☁️ **Uploading to Telegram...**", status_msg, upload_start, last_up_time)
+        )
         os.remove(output_path)
         logger.info("Upload finished.")
+        await status_msg.delete()
     else:
         logger.error("Output missing. Compression failed.")
         await status_msg.edit("❌ Compression failed.")
-    
-    await status_msg.delete()
 
-# --- INCOMING HANDLERS ---
+# --- INCOMING HANDLERS WITH DOWNLOAD PROGRESS ---
 @app.on_message((filters.video | filters.document) & (filters.me | filters.chat("YOUR_GROUP_ID_HERE")))
 async def handle_video(client, message: Message):
-    status = await message.reply("📥 **Downloading...**")
-    
-    last_download_update = time.time()
-    async def progress(current, total):
-        nonlocal last_download_update
-        if time.time() - last_download_update > 3: 
-            percent = current * 100 / total
-            try:
-                await status.edit(f"📥 **Downloading:** `{percent:.1f}%`")
-                last_download_update = time.time()
-            except:
-                pass
+    status = await message.reply("📥 **Starting Download...**")
+    dl_start = time.time()
+    last_up_time = [time.time()]
 
-    file_path = await message.download(progress=progress)
+    file_path = await message.download(
+        progress=progress_for_pyrogram,
+        progress_args=("📥 **Downloading File...**", status, dl_start, last_up_time)
+    )
+    
     await queue.put((message, file_path, "Telegram_Video"))
-    await status.edit(f"✅ **Downloaded & Queued!**\nPosition in queue: {queue.qsize()}")
+    await status.edit(f"✅ **Downloaded & Queued!**\nPosition in queue: `{queue.qsize()}`")
 
 @app.on_message(filters.text & filters.regex(r"http[s]?://") & (filters.me | filters.chat("YOUR_GROUP_ID_HERE")))
 async def handle_direct_link(client, message: Message):
     file_path = await download_link(message.text, message)
     if file_path:
         await queue.put((message, file_path, message.text))
-        await message.reply(f"✅ **Link Queued!**\nPosition in queue: {queue.qsize()}")
+        await message.reply(f"✅ **Link Queued!**\nPosition in queue: `{queue.qsize()}`")
 
 # --- START ---
 if __name__ == "__main__":
