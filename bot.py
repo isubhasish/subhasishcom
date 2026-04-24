@@ -52,10 +52,12 @@ async def set_preset(client, message):
 @app.on_message(filters.command("setres") & filters.me)
 async def set_res(client, message):
     try:
-        settings["resolution"] = int(message.command[1])
-        await message.reply(f"✅ Resolution set to: {settings['resolution']}p")
+        val = message.command[1]
+        # This allows you to type either "480" or "820x480"
+        settings["resolution"] = val
+        await message.reply(f"✅ Resolution set to: {val}")
     except:
-        await message.reply("Use: /setres 720")
+        await message.reply("Use: /setres 720 OR /setres 820x480")
 
 @app.on_message(filters.command("settings") & filters.me)
 async def check_settings(client, message):
@@ -111,12 +113,14 @@ async def process_video(message, input_path):
     logger.info(f"FFmpeg running for HEVC: {input_path}")
 
     # HEVC (H.265) Command for maximum compression / best quality
+    scale_val = f"scale={settings['resolution']}" if "x" in str(settings['resolution']) else f"scale=-2:{settings['resolution']}"
+    
     cmd = [
         "ffmpeg", "-i", input_path,
         "-c:v", "libx265", 
         "-crf", str(settings["crf"]),
         "-preset", settings["preset"],
-        "-vf", f"scale=-2:{settings['resolution']}",
+        "-vf", scale_val,  # <--- Changed this line!
         "-c:a", settings["audio"],
         "-y", output_path
     ]
@@ -166,7 +170,7 @@ async def handle_direct_link(client, message: Message):
         await queue.put((message, file_path, url))
         await message.reply(f"✅ Added to Queue. Position: {queue.qsize()}")
 
-  @app.on_message(filters.command("metadata") & (filters.me | filters.chat("YOUR_GROUP_ID_HERE")))
+@app.on_message(filters.command("metadata") & (filters.me | filters.chat("YOUR_GROUP_ID_HERE")))
 async def check_metadata(client, message):
     # Check if the user replied to a message
     if not message.reply_to_message or not message.reply_to_message.video:
