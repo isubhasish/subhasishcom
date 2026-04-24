@@ -170,7 +170,10 @@ async def process_video(message, input_path):
     status_msg = await message.reply(f"⚙️ Compressing (CRF {settings['crf']}, {settings['preset']})...")
     logger.info(f"FFmpeg running for HEVC: {input_path}")
 
-    scale_val = f"scale={settings['resolution']}" if "x" in str(settings['resolution']) else f"scale=-2:{settings['resolution']}"
+scale_val = f"scale={settings['resolution']}" if "x" in str(settings['resolution']) else f"scale=-2:{settings['resolution']}"
+    
+    # We add .split() to safely break apart the Opus settings!
+    audio_args = settings["audio"].split()
     
     cmd = [
         "ffmpeg", "-i", input_path,
@@ -178,7 +181,8 @@ async def process_video(message, input_path):
         "-crf", str(settings["crf"]),
         "-preset", settings["preset"],
         "-vf", scale_val,  
-        "-c:a", settings["audio"],
+        "-c:a"
+    ] + audio_args + [
         "-y", output_path
     ]
 
