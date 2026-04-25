@@ -7,7 +7,6 @@ import re
 import json
 import traceback
 import io
-import shlex
 import httpx
 from pyrogram import Client, filters, idle
 from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, ForceReply
@@ -19,8 +18,11 @@ START_TIME = time.time()
 current_process = None  
 active_file_name = "None"
 CONFIG_FILE = "config.json"
-pending_tasks = {}    # Stores file info for the pre-download panel
-awaiting_index = {}   # Tracks ForceReply for stream indexes
+THUMB_DIR = "thumbnails"
+pending_tasks = {}    
+awaiting_index = {}   
+
+os.makedirs(THUMB_DIR, exist_ok=True)
 
 # --- LOGGING ---
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - [%(levelname)s] - %(message)s")
@@ -32,7 +34,7 @@ def load_config():
         default = {
             "API_ID": 123456, "API_HASH": "hash", "BOT_TOKEN": "token",
             "OWNER_ID": 12345, "LOG_GROUP_ID": -100, "AUTHORIZED_USERS": [12345],
-            "CRF": 28, "RESOLUTION": "720", "AUDIO_BITRATE": "128k", "PRESET": "medium"
+            "CRF": 38, "RESOLUTION": "820x480", "AUDIO_BITRATE": "96k", "PRESET": "fast"
         }
         with open(CONFIG_FILE, "w") as f: json.dump(default, f, indent=4)
         return default
@@ -67,13 +69,12 @@ async def progress_bar(current, total, ud_type, message, start_time, last_update
         now = time.time()
         speed = current / (now - start_time) if (now - start_time) > 0 else 0
         eta = (total - current) / speed if speed > 0 else 0
-        percent = (current / total) * 100
+        percent = (current / total) * 100 if total > 0 else 0
         text = f"**{ud_type}**\n`[{make_bar(percent)}] {percent:.1f}%`\n\n🚀 Speed: `{humanbytes(speed)}/s` | ETA: `{time_formatter(eta*1000)}`"
         try: await message.edit(text); last_update[0] = now
         except: pass
 
 async def get_graph_link(text):
-    # Posts MediaInfo to Graph.org (Telegraph)
     async with httpx.AsyncClient() as client:
         payload = {
             "title": "MediaInfo Details", "author_name": "Gemini Compressor",
@@ -89,7 +90,6 @@ async def eval_handler(client, message):
     cmd = message.text.split(maxsplit=1)[1]
     msg = await message.reply("Running...")
     try:
-        # Simple dynamic execution logic
         exec(f"async def __ex(client, message): " + "".join(f"\n {l}" for l in cmd.split("\n")))
         result = await locals()["__ex"](client, message)
         await msg.edit(f"**Result:**\n`{result or 'Success'}`")
@@ -108,6 +108,71 @@ async def setvar_cmd(client, message):
 async def restart_cmd(client, message):
     await message.reply("🔄 Restarting..."); os.execl(sys.executable, sys.executable, *sys.argv)
 
+# --- THUMBNAIL LOGIC ---
+@bot_app.on_message(filters.command("setthumbnail") & filters.user(config["AUTHORIZED_USERS"]))
+async def set_thumb(client, message):
+    if not message.reply_to_message or not message.reply_to_message.photo:
+        return await message.reply("⚠️ Reply to a photo with `/setthumbnail` to save it.")
+    path = os.path.join(THUMB_DIR, f"{message.from_user.id}.jpg")
+    await message.reply_to_message.download(file_name=path)
+    await message.reply("✅ Custom thumbnail saved successfully!")
+
+@bot_app.on_message(filters.command("delthumbnail") & filters.user(config["AUTHORIZED_USERS"]))
+async def del_thumb_cmd(client, message):
+    path = os.path.join(THUMB_DIR, f"{message.from_user.id}.jpg")
+    if not os.path.exists(path):
+        return await message.reply("⚠️ You don't have a custom thumbnail set.")
+    btn = InlineKeyboardMarkup([
+        [InlineKeyboardButton("✅ Yes, Delete", callback_data="delthumb_yes"),
+         InlineKeyboardButton("❌ No, Cancel", callback_data="delthumb_no")]
+    ])
+    await message.reply("⚠️ Your existing thumbnail will be deleted. Are you sure?", reply_markup=btn)
+
+@bot_app.on_callback_query(filters.regex(r"^delthumb_(.*)"))
+async def delthumb_cb(client, cb):
+    action = cb.matches[0].group(1)
+    if action == "yes":
+        path = os.path.join(THUMB_DIR, f"{cb.from_user.id}.jpg")
+        if os.path.exists(path): os.remove(path)
+        await cb.message.edit("✅ Thumbnail deleted successfully.")
+    else:
+        await cb.message.edit("❌ Thumbnail deletion cancelled.")
+
+# --- CANCELLATION LOGIC ---
+@bot_app.on_message(filters.command("cancel") & filters.user(config["AUTHORIZED_USERS"]))
+async def cancel_cmd(client, message):
+    if not current_process:
+        return await message.reply("⚠️ No active compression task running right now.")
+    btn = InlineKeyboardMarkup([
+        [InlineKeyboardButton("✅ Yes, Cancel Task", callback_data="confirm_cancel_yes"),
+         InlineKeyboardButton("❌ No, Continue", callback_data="confirm_cancel_no")]
+    ])
+    await message.reply("⚠️ Are you sure you want to cancel the ongoing task?", reply_markup=btn)
+
+@bot_app.on_callback_query(filters.regex("cancel_running"))
+async def cancel_running_cb(client, cb):
+    if not current_process:
+        return await cb.answer("No active task.", show_alert=True)
+    btn = InlineKeyboardMarkup([
+        [InlineKeyboardButton("✅ Yes, Cancel Task", callback_data="confirm_cancel_yes"),
+         InlineKeyboardButton("❌ No, Continue", callback_data="confirm_cancel_no")]
+    ])
+    await bot_app.send_message(cb.message.chat.id, "⚠️ Are you sure you want to cancel the ongoing task?", reply_markup=btn)
+
+@bot_app.on_callback_query(filters.regex(r"^confirm_cancel_(.*)"))
+async def confirm_cancel_cb(client, cb):
+    global current_process
+    action = cb.matches[0].group(1)
+    if action == "yes":
+        if current_process:
+            current_process.terminate()
+            current_process = None
+            await cb.message.edit("🛑 **Task Cancelled.** Moving to next in queue...")
+        else:
+            await cb.message.edit("⚠️ No active task to cancel.")
+    else:
+        await cb.message.edit("▶️ Cancellation aborted. Continuing task.")
+
 # --- PANEL CALLBACKS ---
 @bot_app.on_callback_query(filters.regex(r"^panel_(.*)"))
 async def panel_handler(client, cb):
@@ -117,9 +182,8 @@ async def panel_handler(client, cb):
 
     if action == "info":
         await cb.message.edit("📝 Probing MediaInfo (No download)...")
-        # Fast Probe: Download 2MB to temp
         chunk_path = f"probe_{tid}.mkv"
-        await user_app.download_media(task['msg'], file_name=chunk_path, limit=1) # 1 chunk = ~1-2MB
+        await user_app.download_media(task['msg'], file_name=chunk_path, limit=1) 
         info = os.popen(f"mediainfo {chunk_path}").read()
         os.remove(chunk_path)
         link = await get_graph_link(info)
@@ -160,31 +224,78 @@ async def index_receiver(client, message):
 
 # --- FFMPEG WORKER ---
 async def worker():
+    global current_process
     while True:
         msg, name, map_args, status_msg = await queue.get()
         try:
-            # Step 1: Full Download (User Session)
             start_time = time.time()
             last_up = [time.time()]
             await status_msg.edit("📥 **Downloading Full File...**")
             file_path = await user_app.download_media(msg, progress=progress_bar, progress_args=("Downloading", status_msg, start_time, last_up))
             
-            # Step 2: Compress
             base = name.replace(" ", ".").rsplit(".", 1)[0]
             out = f"{base}.Compressed.mkv"
-            await status_msg.edit(f"⚙️ **Compressing:** `{name}`")
+            
+            btn = InlineKeyboardMarkup([[InlineKeyboardButton("🛑 Cancel Task", callback_data="cancel_running")]])
+            await status_msg.edit(f"⚙️ **Compressing:** `{name}`", reply_markup=btn)
             
             cmd = ["ffmpeg", "-i", file_path] + map_args + [
                 "-c:v", "libx265", "-crf", str(config["CRF"]), "-preset", config["PRESET"],
-                "-vf", f"scale=-2:{config['RESOLUTION']}", "-c:a", "libopus", "-b:a", config["AUDIO_BITRATE"],
+                "-vf", f"scale={config['RESOLUTION']}", "-c:a", "libopus", "-b:a", config["AUDIO_BITRATE"],
                 "-y", out
             ]
             process = await asyncio.create_subprocess_exec(*cmd, stderr=asyncio.subprocess.PIPE)
-            await process.wait()
+            current_process = process
             
-            # Step 3: Upload Document
-            await user_app.send_document(msg.chat.id, out, caption=f"✅ {out}", force_document=True)
-            await status_msg.edit("✅ Done!")
+            last_update_time = time.time()
+            duration_sec = 0
+
+            while True:
+                line = await process.stderr.readline()
+                if not line: break
+                line_str = line.decode('utf-8', errors='ignore').strip()
+                
+                if not duration_sec and "Duration:" in line_str:
+                    match = re.search(r"Duration:\s*(\d{2}):(\d{2}):(\d{2})", line_str)
+                    if match: duration_sec = int(match.group(1))*3600 + int(match.group(2))*60 + int(match.group(3))
+
+                if "time=" in line_str:
+                    time_match = re.search(r"time=(\d{2}):(\d{2}):(\d{2})", line_str)
+                    if time_match and (time.time() - last_update_time > 5):
+                        curr_sec = int(time_match.group(1))*3600 + int(time_match.group(2))*60 + int(time_match.group(3))
+                        if duration_sec > 0:
+                            percent = (curr_sec / duration_sec) * 100
+                            elapsed = time.time() - start_time
+                            speed = curr_sec / elapsed if elapsed > 0 else 0
+                            eta = (duration_sec - curr_sec) / speed if speed > 0 else 0
+                            text = f"⚙️ **Processing Video**\n`[{make_bar(percent)}] {percent:.1f}%`\n\n⏱ Time: `{time_match.group(1)} / {time_formatter(duration_sec*1000)}`\n⏳ ETA: `{time_formatter(eta*1000)}`"
+                        else:
+                            text = f"⚙️ **Processing Video...**\n⏱ `{time_match.group(1)}`"
+                        try:
+                            await status_msg.edit(text, reply_markup=btn)
+                            last_update_time = time.time()
+                        except: pass
+
+            await process.wait()
+            if current_process == process: current_process = None
+
+            if process.returncode != 0:
+                if os.path.exists(out): os.remove(out) 
+                if os.path.exists(file_path): os.remove(file_path)
+                continue
+
+            # Apply Thumbnail if available
+            thumb_path = os.path.join(THUMB_DIR, f"{msg.from_user.id}.jpg")
+            actual_thumb = thumb_path if os.path.exists(thumb_path) else None
+
+            upload_start = time.time()
+            last_up_time = [time.time()]
+            await user_app.send_document(
+                chat_id=msg.chat.id, document=out, thumb=actual_thumb,
+                caption=f"✅ **{out}**\n*(Compressed by Gemini)*", force_document=True,
+                progress=progress_bar, progress_args=("☁️ **Uploading...**", status_msg, upload_start, last_up_time)
+            )
+            await status_msg.edit("✅ Process Complete!")
             os.remove(file_path); os.remove(out)
         except Exception as e: logger.error(e)
         finally: queue.task_done()
