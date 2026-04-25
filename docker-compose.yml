@@ -1,14 +1,9 @@
-version: "3.3"
+version: '3.8'
+
 services:
-  worker:
+  compressor-bot:
     build: .
-    restart: on-failure
-    environment:
-      APP_ID: "13826300"
-      API_HASH: "bef7f08ecc596f5ad4792598d6106b99"
-      TG_BOT_TOKEN: "5467839304:AAGiIEOlr_CBZ7jMwgktnSMaHMOGBVKX8t4"
-      AUTH_USERS: "1051485224 697370880 1731354360 -1001731354360"
-      LOG_CHANNEL: "moinsubhasishlogs"
-      BOT_USERNAME: "SubhasishEncoderRobot"
-      ENV: "ANYTHING"
-      SESSION_NAME: "AHCompressBot"
+    container_name: subhasish_compressor
+    restart: unless-stopped
+    volumes:
+      - .:/app
