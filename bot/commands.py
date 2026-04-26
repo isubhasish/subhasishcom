@@ -7,6 +7,7 @@ import random
 import asyncio
 import traceback
 import gc
+import speedtest
 from pyrogram import filters
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from bot.__init__ import bot_app, user_app, config_data
@@ -31,7 +32,9 @@ def get_uptime():
     uptime_ms = int((time.time() - START_TIME) * 1000)
     return get_readable_time(uptime_ms)
 
-# --- PUBLIC COMMANDS ---
+# ==========================================
+# 🟢 PUBLIC COMMANDS
+# ==========================================
 @bot_app.on_message(filters.command("start"))
 async def start_cmd(client, message): 
     await message.reply(Localisation.START_TEXT)
@@ -67,15 +70,14 @@ async def status_cmd(client, message):
     
     msg = await message.reply(text)
     
-    # Auto-Delete if no tasks are running to keep chat clean
     if AppState.active_file_name == "None" and queue.qsize() == 0:
         await asyncio.sleep(30)
-        try:
-            await msg.delete()
+        try: await msg.delete()
         except: pass
 
 @bot_app.on_message(filters.command("settings"))
 async def settings_cmd(client, message):
+    if not is_sudo(message): return await message.reply(UNAUTH_MSG)
     text = (
         "⚠️ **Current Ffmpeg Code Settings**\n"
         "The current settings will be added to your video file :\n\n"
@@ -89,7 +91,33 @@ async def settings_cmd(client, message):
     )
     await message.reply(text)
 
-# --- SUDO COMMANDS ---
+# ==========================================
+# 🔴 SUDO COMMANDS
+# ==========================================
+async def update_setting(message, key, display_name):
+    if not is_sudo(message): return await message.reply(UNAUTH_MSG)
+    if len(message.command) < 2: return await message.reply(f"Current {display_name}: `{config_data[key]}`")
+    val = message.command[1]
+    if str(config_data[key]) == str(val): return await message.reply(f"⚠️ {display_name} is already set to `{val}`")
+    config_data[key] = val
+    Config.save_config(config_data)
+    await message.reply(f"✅ {display_name} successfully updated to `{val}`.")
+
+@bot_app.on_message(filters.command("preset"))
+async def preset_cmd(client, message): await update_setting(message, "PRESET", "preset")
+
+@bot_app.on_message(filters.command("crf"))
+async def crf_cmd(client, message): await update_setting(message, "CRF", "crf")
+
+@bot_app.on_message(filters.command("audio"))
+async def audio_cmd(client, message): await update_setting(message, "AUDIO_BITRATE", "audio_bitrate")
+
+@bot_app.on_message(filters.command("resolution"))
+async def res_cmd(client, message): await update_setting(message, "RESOLUTION", "resolution")
+
+@bot_app.on_message(filters.command("codec"))
+async def codec_cmd(client, message): await update_setting(message, "CODEC", "codec")
+
 @bot_app.on_message(filters.command("clear"))
 async def clear_cmd(client, message):
     if not is_sudo(message): return await message.reply(UNAUTH_MSG)
@@ -213,9 +241,97 @@ async def samplegen_cmd(client, message):
     msg = await message.reply("⏳ **Initializing Random Sample Generator...**")
     asyncio.create_task(generate_sample_background(client, message.reply_to_message, msg))
 
+# --- HIJACKED FEATURE: SERVER SPEEDTEST ---
+def run_speedtest():
+    st = speedtest.Speedtest()
+    st.get_best_server()
+    st.download()
+    st.upload()
+    return st.results.dict()
+
+@bot_app.on_message(filters.command("speedtest"))
+async def speedtest_cmd(client, message):
+    if not is_sudo(message): return await message.reply(UNAUTH_MSG)
+    msg = await message.reply("⏳ **Running Server Speedtest...** *(This takes about 20 seconds)*")
+    try:
+        res = await asyncio.to_thread(run_speedtest)
+        d_speed = humanbytes(res['download'] / 8)
+        u_speed = humanbytes(res['upload'] / 8)
+        ping = res['ping']
+        
+        text = (
+            f"🚀 **Oracle Server Speedtest**\n\n"
+            f"🔻 **Download:** `{d_speed}/s`\n"
+            f"🔺 **Upload:** `{u_speed}/s`\n"
+            f"📶 **Ping:** `{ping} ms`\n"
+            f"🌍 **Server:** `{res['server']['name']}, {res['server']['country']}`"
+        )
+        await msg.edit(text)
+    except Exception as e:
+        await msg.edit(f"❌ **Speedtest Failed:** {e}")
+
+async def aexec(code, client, message):
+    exec(f"async def __aexec(client, message): " + "".join(f"\n {l}" for l in code.split("\n")))
+    return await locals()["__aexec"](client, message)
+
+@bot_app.on_message(filters.command(["eval", "exec"]))
+async def eval_handler(client, message):
+    if not is_sudo(message): return await message.reply(UNAUTH_MSG)
+    if len(message.text.split()) < 2: return
+    cmd = message.text.split(maxsplit=1)[1]
+    msg = await message.reply("Processing...")
+    old_stderr = sys.stderr; old_stdout = sys.stdout; redirected_output = sys.stdout = io.StringIO(); redirected_error = sys.stderr = io.StringIO()
+    stdout, stderr, exc = None, None, None
+    try: await aexec(cmd, client, message)
+    except Exception: exc = traceback.format_exc()
+    stdout = redirected_output.getvalue(); stderr = redirected_error.getvalue(); sys.stdout = old_stdout; sys.stderr = old_stderr
+    evaluation = exc or stderr or stdout or "Success"
+    final_output = f"<b>EVAL</b>: <code>{cmd}</code>\n\n<b>OUTPUT</b>:\n<code>{evaluation.strip()}</code>\n"
+
+    if len(final_output) > 4000:
+        with open("eval.txt", "w+", encoding="utf8") as out_file: out_file.write(str(final_output))
+        await message.reply_document(document="eval.txt", caption=cmd[:100], disable_notification=True)
+        os.remove("eval.txt"); await msg.delete()
+    else: await msg.edit(final_output)
+
+@bot_app.on_message(filters.command("clearlocals"))
+async def clearlocals_cmd(client, message):
+    if not is_sudo(message): return await message.reply(UNAUTH_MSG)
+    try:
+        gc.collect()
+        await message.reply("✅ **Local Execution Variables Cleared!**\nServer RAM has been optimized and flushed.")
+    except Exception as e:
+        await message.reply(f"❌ **Failed to clear locals:** {e}")
+
+@bot_app.on_message(filters.command("restart"))
+async def restart_cmd(client, message):
+    if not is_sudo(message): return await message.reply(UNAUTH_MSG)
+    msg = await message.reply("🔄 **Restarting the server now...**")
+    with open("restart.json", "w") as f: json.dump({"chat_id": msg.chat.id, "message_id": msg.id}, f)
+    os.execl(sys.executable, sys.executable, *sys.argv)
+
 # ==========================================
 # 👑 OWNER ONLY COMMANDS
 # ==========================================
+@bot_app.on_message(filters.command("broadcast") & filters.private)
+async def broadcast_cmd(client, message):
+    if not is_owner(message): return await message.reply(UNAUTH_MSG)
+    if len(message.command) < 2: return await message.reply("⚠️ Usage: `/broadcast Your message here`")
+    
+    b_msg = message.text.split(maxsplit=1)[1]
+    success = 0
+    failed = 0
+    
+    await message.reply(f"📣 **Broadcasting to {len(config_data['AUTH_USERS'])} users...**")
+    
+    for user_id in config_data['AUTH_USERS']:
+        try:
+            await bot_app.send_message(user_id, f"📣 **Announcement from Admin:**\n\n{b_msg}")
+            success += 1
+            await asyncio.sleep(0.5) 
+        except: failed += 1
+            
+    await message.reply(f"✅ **Broadcast Complete!**\n\n🟢 **Success:** `{success}`\n🔴 **Failed:** `{failed}`")
 
 @bot_app.on_message(filters.command("bsetting") & filters.private)
 async def bsetting_cmd(client, message):
@@ -235,7 +351,7 @@ async def bsetting_cmd(client, message):
          InlineKeyboardButton("AUDIO_BITRATE", callback_data="bsetting_select_AUDIO_BITRATE")],
         [InlineKeyboardButton("CODEC", callback_data="bsetting_select_CODEC"),
          InlineKeyboardButton("WATERMARK", callback_data="bsetting_select_WATERMARK_TEXT")],
-        [InlineKeyboardButton("AS_DOCUMENT", callback_data="bsetting_toggle_AS_DOCUMENT")], # Converted to a toggle
+        [InlineKeyboardButton("AS_DOCUMENT", callback_data="bsetting_toggle_AS_DOCUMENT")], 
         [InlineKeyboardButton("❌ Close", callback_data="bsetting_close")]
     ])
     
@@ -272,48 +388,9 @@ async def bsetting_input_catcher(client, message):
         
         if key in sensitive_keys:
             text = f"❓ **Confirm {key}**\n\nSensitive credential detected.\nDo you want to securely save this?"
+        elif key == "AS_DOCUMENT":
+            text = f"❓ **Confirm Update**\n\nYou entered **{val}**.\n*(Only type True or False)*\n\nDo you want to save this?"
         else:
             text = f"❓ **Confirm Update**\n\nYou entered a new value for **{key}**:\n`{val}`\n\nDo you want to save this?"
             
         await message.reply(text, reply_markup=btn)
-
-async def aexec(code, client, message):
-    exec(f"async def __aexec(client, message): " + "".join(f"\n {l}" for l in code.split("\n")))
-    return await locals()["__aexec"](client, message)
-
-@bot_app.on_message(filters.command(["eval", "exec"]))
-async def eval_handler(client, message):
-    if not is_owner(message): return await message.reply(UNAUTH_MSG)
-    if len(message.text.split()) < 2: return
-    cmd = message.text.split(maxsplit=1)[1]
-    msg = await message.reply("Processing...")
-    old_stderr = sys.stderr; old_stdout = sys.stdout; redirected_output = sys.stdout = io.StringIO(); redirected_error = sys.stderr = io.StringIO()
-    stdout, stderr, exc = None, None, None
-    try: await aexec(cmd, client, message)
-    except Exception: exc = traceback.format_exc()
-    stdout = redirected_output.getvalue(); stderr = redirected_error.getvalue(); sys.stdout = old_stdout; sys.stderr = old_stderr
-    evaluation = exc or stderr or stdout or "Success"
-    final_output = f"<b>EVAL</b>: <code>{cmd}</code>\n\n<b>OUTPUT</b>:\n<code>{evaluation.strip()}</code>\n"
-
-    if len(final_output) > 4000:
-        with open("eval.txt", "w+", encoding="utf8") as out_file: out_file.write(str(final_output))
-        await message.reply_document(document="eval.txt", caption=cmd[:100], disable_notification=True)
-        os.remove("eval.txt"); await msg.delete()
-    else: await msg.edit(final_output)
-
-# --- CLEAR LOCALS COMMAND ---
-@bot_app.on_message(filters.command("clearlocals"))
-async def clearlocals_cmd(client, message):
-    if not is_owner(message): return await message.reply(UNAUTH_MSG)
-    try:
-        gc.collect()
-        await message.reply("✅ **Local Execution Variables Cleared!**\nServer RAM has been optimized and flushed.")
-    except Exception as e:
-        await message.reply(f"❌ **Failed to clear locals:** {e}")
-
-@bot_app.on_message(filters.command("restart"))
-async def restart_cmd(client, message):
-    if not is_owner(message): return await message.reply(UNAUTH_MSG)
-    msg = await message.reply("🔄 **Restarting the server now...**")
-    with open("restart.json", "w") as f: json.dump({"chat_id": msg.chat.id, "message_id": msg.id}, f)
-    os.execl(sys.executable, sys.executable, *sys.argv)
