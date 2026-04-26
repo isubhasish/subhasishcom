@@ -17,31 +17,11 @@ Built with advanced FFmpeg integration, `pyrofork` MTProto architecture, and a b
 
 ---
 
-## 🛠️ Deployment (Oracle VPS via Docker)
-
-### 1. Set Up Your Configuration
-Rename `config.sample.json` to `config.json` inside your private repo and fill in your details:
-* Get `API_ID` and `API_HASH` from `my.telegram.org`.
-* Get `USER_SESSION_STRING` from a Pyrogram String Session generator (Required for expanded limits).
-
-### 2. Connect via SSH (PuTTY) & Install Tools
-Run this magical one-liner to securely install all necessary packages natively on your Ubuntu server:
-
-```bash
-sudo apt-get update && sudo apt-get upgrade -y && sudo apt-get install docker.io docker-compose git -y
-
-
-
-
-# How to deploy?
-
-
-
 ## Deploy to Heroku (Using Dockerfile & Team)
 
 [![Deploy](https://www.herokucdn.com/deploy/button.svg)](https://dashboard.heroku.com/new?team=amc-tg-dev&template=https://github.com/isubhasish/backup)
 
-## Deploy Normally On ORACLE VPS For Our New Bot
+## 🛠️ Deployment (Oracle VPS via Docker)
 
 ### Advanced Installing Sequence
 
