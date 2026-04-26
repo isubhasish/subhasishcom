@@ -6,41 +6,33 @@
 
 [![Deploy](https://www.herokucdn.com/deploy/button.svg)](https://dashboard.heroku.com/new?team=amc-tg-dev&template=https://github.com/isubhasish/backup)
 
-## Deploy Normally On VPS
+## Deploy Normally On ORACLE VPS For Our New Bot
 
-### Installing Requirements
+### Advanced Installing Sequence
 
-- Preparing Terminal
+- Update the Server & Install Everything.
 ```
-sudo su
-```
-```
-sudo apt-get update
+sudo apt-get update && sudo apt-get upgrade -y
 ```
 ```
-sudo apt-get upgrade
+sudo apt-get install docker.io docker-compose git -y
 ```
-```
-sudo apt install python3-pip
-```
+
 - Clone & Select This Private Repo:
 ```
-git clone https://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@github.com/isubhasish/backup/
+git clone https://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@github.com/isubhasish/aiencoder/
 ```
 ```
-cd backup
+cd aiencoder
 ```
-Install The Required Python Modules In Your Machine.
+Build and Run the Bot.
 ```sh
-apt-get -qq install ffmpeg
+sudo docker-compose up -d --build
 ```
-```
-pip3 install -r requirements.txt
-```
-### Deployment
-With python3.7 or later.
+### Check Live Logs
+Included Beautiful Custom Boot Sequence.
 ```sh
-python3 -m bot
+sudo docker logs -f subhasish_compressor
 ```
 
 ------
@@ -100,6 +92,9 @@ sudo docker ps
 ```
 sudo docker stop id
 ```
+```
+sudo docker-compose down
+```
 ------
 ### To Delete The Image (When Necessary):
 ```
@@ -107,6 +102,14 @@ sudo docker container prune
 ```
 ```
 sudo docker image prune -a
+```
+```
+sudo docker-compose down --rmi all
+```
+sudo docker builder prune -a -f
+```
+```
+sudo docker system prune -a -f
 ```
 ------
 ## Easy Deploy:
