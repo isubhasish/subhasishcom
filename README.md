@@ -1,3 +1,38 @@
+# 🎬 Subhasish Encoder - Advanced Telegram Video Compressor
+
+A high-performance, modular Telegram Bot designed to securely download, compress, and upload massive video files directly on an Oracle Always Free VPS. 
+
+Built with advanced FFmpeg integration, `pyrofork` MTProto architecture, and a bulletproof Dockerized environment. **100% DMCA Safe.**
+
+---
+
+## ✨ Enterprise Features
+
+* 🚀 **Dynamic 4GB Limit Bypass:** Natively detects Premium vs. Non-Premium User Sessions to seamlessly handle 2.0GB or 4.0GB uploads.
+* 🛡️ **Mime-Type Armor:** Instantly rejects disguised ZIP/PDF documents to protect your server's bandwidth.
+* 🎛️ **Interactive UI Menu (`/bsetting`):** Change `CRF`, `CODEC`, Watermarks, and Document Uploads instantly with a visual toggle board.
+* ✂️ **Smart Auto-Splitter:** Safely segments files that exceed Telegram's size limits without losing video quality.
+* 🖥️ **Live Hardware Telemetry:** Monitor your Oracle VPS's CPU, RAM, and Network I/O directly in your Telegram chat (`/status`).
+* 🏷️ **Custom Watermarking:** Burn your own custom text natively into your compressed videos.
+
+---
+
+## 🛠️ Deployment (Oracle VPS via Docker)
+
+### 1. Set Up Your Configuration
+Rename `config.sample.json` to `config.json` inside your private repo and fill in your details:
+* Get `API_ID` and `API_HASH` from `my.telegram.org`.
+* Get `USER_SESSION_STRING` from a Pyrogram String Session generator (Required for expanded limits).
+
+### 2. Connect via SSH (PuTTY) & Install Tools
+Run this magical one-liner to securely install all necessary packages natively on your Ubuntu server:
+
+```bash
+sudo apt-get update && sudo apt-get upgrade -y && sudo apt-get install docker.io docker-compose git -y
+
+
+
+
 # How to deploy?
 
 
@@ -106,15 +141,14 @@ sudo docker image prune -a
 ```
 sudo docker-compose down --rmi all
 ```
+```
 sudo docker builder prune -a -f
 ```
 ```
 sudo docker system prune -a -f
 ```
 ------
-## Easy Deploy:
-[![Deploy](https://www.herokucdn.com/deploy/button.svg)](https://heroku.com/deploy)
- 
+
 ### Bot Father Setting Commands:
 ```
 start - Start The Bot 🤖
