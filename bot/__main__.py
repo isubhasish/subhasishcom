@@ -46,7 +46,13 @@ async def start_hybrid():
             os.remove("restart.json")
     
     logger.info("Booting Upload Client...")
-    await user_app.start()
+    
+    # --- BUG FIX: THE HYBRID START PREVENTER ---
+    if user_app != bot_app:
+        await user_app.start()
+        logger.info("✅ User Session Client started successfully.")
+    else:
+        logger.info("✅ Running in Bot-Only Mode (Upload Client skipped).")
     
     # --- DYNAMIC LIMIT CHECKER ---
     # Correctly validates if the account can handle 4GB or 2GB uploads via MTProto
@@ -64,8 +70,10 @@ async def start_hybrid():
     logger.info("Subhasish Encoder is fully online!")
     await idle()
     
+    # --- BUG FIX: THE HYBRID STOP PREVENTER ---
     await bot_app.stop()
-    await user_app.stop()
+    if user_app != bot_app:
+        await user_app.stop()
 
 if __name__ == "__main__":
     loop = asyncio.get_event_loop()
