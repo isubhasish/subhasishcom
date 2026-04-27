@@ -23,7 +23,6 @@ UNAUTH_MSG = "<b>Opps You Need To Donate Some Amount To Use Meh...🐸👀</b>"
 def is_sudo(message):
     user_id = message.from_user.id if message.from_user else 0
     chat_id = message.chat.id
-    # Checks if EITHER the user OR the group is authorized
     return user_id in config_data["AUTH_USERS"] or user_id == config_data["OWNER_ID"] or chat_id in config_data["AUTH_USERS"]
 
 def is_owner(message):
@@ -34,6 +33,15 @@ def get_uptime():
     uptime_ms = int((time.time() - START_TIME) * 1000)
     return get_readable_time(uptime_ms)
 
+# --- THE ULTIMATE AUTO-CLEAN FUNCTION ---
+async def auto_clean(msg, message):
+    await asyncio.sleep(30)
+    if AppState.active_file_name == "None" and queue.qsize() == 0:
+        try:
+            await msg.delete()
+            await message.delete()
+        except: pass
+
 # ==========================================
 # 🟢 PUBLIC COMMANDS
 # ==========================================
@@ -43,7 +51,8 @@ async def start_cmd(client, message):
 
 @bot_app.on_message(filters.command("help"))
 async def help_cmd(client, message): 
-    await message.reply(Localisation.HELP_TEXT)
+    msg = await message.reply(Localisation.HELP_TEXT)
+    asyncio.create_task(auto_clean(msg, message))
 
 @bot_app.on_message(filters.command("ping"))
 async def ping_cmd(client, message):
@@ -52,15 +61,7 @@ async def ping_cmd(client, message):
     end_t = time.time()
     ping_ms = round((end_t - start_t) * 1000)
     await msg.edit(f"📶Pɪɴɢ = {ping_ms}ms\n⏰ **Uptime:** `{get_uptime()}`")
-    
-    # Auto-Delete BOTH the bot's reply and the user's command if idle
-    if AppState.active_file_name == "None" and queue.qsize() == 0:
-        await asyncio.sleep(30)
-        try:
-            await msg.delete()
-            await message.delete()
-        except:
-            pass
+    asyncio.create_task(auto_clean(msg, message))
 
 # ==========================================
 # 🔴 SUDO COMMANDS
@@ -81,15 +82,19 @@ async def settings_cmd(client, message):
     )
     await message.reply(text)
 
-# ---> RESTORED DIRECT SETTING COMMANDS <---
 async def update_setting(message, key, display_name):
     if not is_sudo(message): return await message.reply(UNAUTH_MSG)
-    if len(message.command) < 2: return await message.reply(f"Current {display_name}: `{config_data[key]}`")
+    if len(message.command) < 2: 
+        msg = await message.reply(f"Current {display_name}: `{config_data[key]}`")
+        return asyncio.create_task(auto_clean(msg, message))
     val = message.command[1]
-    if str(config_data[key]) == str(val): return await message.reply(f"⚠️ {display_name} is already set to `{val}`")
+    if str(config_data[key]) == str(val): 
+        msg = await message.reply(f"⚠️ {display_name} is already set to `{val}`")
+        return asyncio.create_task(auto_clean(msg, message))
     config_data[key] = val
     Config.save_config(config_data)
-    await message.reply(f"✅ {display_name} successfully updated to `{val}`.")
+    msg = await message.reply(f"✅ {display_name} successfully updated to `{val}`.")
+    asyncio.create_task(auto_clean(msg, message))
 
 @bot_app.on_message(filters.command("preset"))
 async def preset_cmd(client, message): await update_setting(message, "PRESET", "preset")
@@ -105,27 +110,23 @@ async def res_cmd(client, message): await update_setting(message, "RESOLUTION", 
 
 @bot_app.on_message(filters.command("codec"))
 async def codec_cmd(client, message): await update_setting(message, "CODEC", "codec")
-# ------------------------------------------
 
 @bot_app.on_message(filters.command("clear"))
 async def clear_cmd(client, message):
     if not is_sudo(message): return await message.reply(UNAUTH_MSG)
     while not queue.empty(): queue.get_nowait(); queue.task_done()
-    await message.reply(Localisation.QUEUE_CLEARED)
+    msg = await message.reply(Localisation.QUEUE_CLEARED)
+    asyncio.create_task(auto_clean(msg, message))
 
-@bot_app.on_message(filters.command(["cancel", "stop"]))
+@bot_app.on_message(filters.command("cancel"))
 async def cancel_cmd(client, message):
     if not is_sudo(message): return await message.reply(UNAUTH_MSG)
-    if not AppState.current_process: return await message.reply(Localisation.NO_ACTIVE_TASK)
+    if not AppState.current_process: 
+        msg = await message.reply(Localisation.NO_ACTIVE_TASK)
+        return asyncio.create_task(auto_clean(msg, message))
     btn = InlineKeyboardMarkup([[InlineKeyboardButton("Yes✅", callback_data="confirm_cancel_yes"), InlineKeyboardButton("No ❌", callback_data="confirm_cancel_no")]])
-    await message.reply(Localisation.CANCEL_PROMPT, reply_markup=btn, quote=True)
-
-@bot_app.on_message(filters.command("cancelall"))
-async def cancel_all_cmd(client, message):
-    if not is_sudo(message): return await message.reply(UNAUTH_MSG)
-    while not queue.empty(): queue.get_nowait(); queue.task_done()
-    if AppState.current_process: AppState.current_process.terminate(); AppState.current_process = None
-    await message.reply("⚠️ **ALL TASKS CANCELLED AND QUEUE CLEARED.**")
+    msg = await message.reply(Localisation.CANCEL_PROMPT, reply_markup=btn, quote=True)
+    asyncio.create_task(auto_clean(msg, message))
 
 @bot_app.on_message(filters.command("log"))
 async def log_cmd(client, message):
@@ -158,22 +159,6 @@ async def mediainfo_cmd(client, message):
     except Exception as e:
         await msg.edit(f"❌ Error: {e}")
         if os.path.exists(chunk_path): os.remove(chunk_path)
-
-@bot_app.on_message(filters.command("setthumbnail"))
-async def set_thumb(client, message):
-    if not is_sudo(message): return await message.reply(UNAUTH_MSG)
-    if not message.reply_to_message or not message.reply_to_message.photo: return await message.reply(Localisation.INVALID_THUMB)
-    path = os.path.join(Config.THUMB_DIR, f"{message.from_user.id}.jpg")
-    await message.reply_to_message.download(file_name=path)
-    await message.reply(Localisation.THUMB_ADDED)
-
-@bot_app.on_message(filters.command("delthumbnail"))
-async def del_thumb_cmd(client, message):
-    if not is_sudo(message): return await message.reply(UNAUTH_MSG)
-    path = os.path.join(Config.THUMB_DIR, f"{message.from_user.id}.jpg")
-    if not os.path.exists(path): return await message.reply("⚠️ You don't have a custom thumbnail set.")
-    btn = InlineKeyboardMarkup([[InlineKeyboardButton("Yes✅", callback_data="delthumb_yes"), InlineKeyboardButton("No ❌", callback_data="delthumb_no")]])
-    await message.reply(Localisation.THUMB_WARNING, reply_markup=btn)
 
 async def generate_sample_background(client, target_message, status_msg):
     try:
@@ -230,58 +215,6 @@ async def samplegen_cmd(client, message):
     msg = await message.reply("⏳ **Initializing Random Sample Generator...**")
     asyncio.create_task(generate_sample_background(client, message.reply_to_message, msg))
 
-def run_speedtest():
-    st = speedtest.Speedtest()
-    st.get_best_server()
-    st.download()
-    st.upload()
-    return st.results.dict()
-
-@bot_app.on_message(filters.command("speedtest"))
-async def speedtest_cmd(client, message):
-    if not is_sudo(message): return await message.reply(UNAUTH_MSG)
-    msg = await message.reply("⏳ **Running Server Speedtest...** *(This takes about 20 seconds)*")
-    try:
-        res = await asyncio.to_thread(run_speedtest)
-        d_speed = humanbytes(res['download'] / 8)
-        u_speed = humanbytes(res['upload'] / 8)
-        ping = res['ping']
-        
-        text = (
-            f"🚀 **Oracle Server Speedtest**\n\n"
-            f"🔻 **Download:** `{d_speed}/s`\n"
-            f"🔺 **Upload:** `{u_speed}/s`\n"
-            f"📶 **Ping:** `{ping} ms`\n"
-            f"🌍 **Server:** `{res['server']['name']}, {res['server']['country']}`"
-        )
-        await msg.edit(text)
-    except Exception as e:
-        await msg.edit(f"❌ **Speedtest Failed:** {e}")
-
-async def aexec(code, client, message):
-    exec(f"async def __aexec(client, message): " + "".join(f"\n {l}" for l in code.split("\n")))
-    return await locals()["__aexec"](client, message)
-
-@bot_app.on_message(filters.command(["eval", "exec"]))
-async def eval_handler(client, message):
-    if not is_sudo(message): return await message.reply(UNAUTH_MSG)
-    if len(message.text.split()) < 2: return
-    cmd = message.text.split(maxsplit=1)[1]
-    msg = await message.reply("Processing...")
-    old_stderr = sys.stderr; old_stdout = sys.stdout; redirected_output = sys.stdout = io.StringIO(); redirected_error = sys.stderr = io.StringIO()
-    stdout, stderr, exc = None, None, None
-    try: await aexec(cmd, client, message)
-    except Exception: exc = traceback.format_exc()
-    stdout = redirected_output.getvalue(); stderr = redirected_error.getvalue(); sys.stdout = old_stdout; sys.stderr = old_stderr
-    evaluation = exc or stderr or stdout or "Success"
-    final_output = f"<b>EVAL</b>: <code>{cmd}</code>\n\n<b>OUTPUT</b>:\n<code>{evaluation.strip()}</code>\n"
-
-    if len(final_output) > 4000:
-        with open("eval.txt", "w+", encoding="utf8") as out_file: out_file.write(str(final_output))
-        await message.reply_document(document="eval.txt", caption=cmd[:100], disable_notification=True)
-        os.remove("eval.txt"); await msg.delete()
-    else: await msg.edit(final_output)
-
 @bot_app.on_message(filters.command("clearlocals"))
 async def clearlocals_cmd(client, message):
     if not is_sudo(message): return await message.reply(UNAUTH_MSG)
@@ -301,7 +234,87 @@ async def restart_cmd(client, message):
 # ==========================================
 # 👑 OWNER ONLY COMMANDS
 # ==========================================
-@bot_app.on_message(filters.command("broadcast") & filters.private)
+@bot_app.on_message(filters.command("cancelall"))
+async def cancel_all_cmd(client, message):
+    if not is_owner(message): return await message.reply(UNAUTH_MSG)
+    while not queue.empty(): queue.get_nowait(); queue.task_done()
+    if AppState.current_process: AppState.current_process.terminate(); AppState.current_process = None
+    msg = await message.reply("⚠️ **ALL TASKS CANCELLED AND QUEUE CLEARED.**")
+    asyncio.create_task(auto_clean(msg, message))
+
+@bot_app.on_message(filters.command("setthumbnail"))
+async def set_thumb(client, message):
+    if not is_owner(message): return await message.reply(UNAUTH_MSG)
+    if not message.reply_to_message or not message.reply_to_message.photo: return await message.reply(Localisation.INVALID_THUMB)
+    path = os.path.join(Config.THUMB_DIR, f"{message.from_user.id}.jpg")
+    await message.reply_to_message.download(file_name=path)
+    await message.reply(Localisation.THUMB_ADDED)
+
+@bot_app.on_message(filters.command("delthumbnail"))
+async def del_thumb_cmd(client, message):
+    if not is_owner(message): return await message.reply(UNAUTH_MSG)
+    path = os.path.join(Config.THUMB_DIR, f"{message.from_user.id}.jpg")
+    if not os.path.exists(path): 
+        msg = await message.reply("⚠️ You don't have a custom thumbnail set.")
+        return asyncio.create_task(auto_clean(msg, message))
+    btn = InlineKeyboardMarkup([[InlineKeyboardButton("Yes✅", callback_data="delthumb_yes"), InlineKeyboardButton("No ❌", callback_data="delthumb_no")]])
+    msg = await message.reply(Localisation.THUMB_WARNING, reply_markup=btn)
+    asyncio.create_task(auto_clean(msg, message))
+
+@bot_app.on_message(filters.command("speedtest"))
+async def speedtest_cmd(client, message):
+    if not is_owner(message): return await message.reply(UNAUTH_MSG)
+    msg = await message.reply("⏳ **Running Server Speedtest...**\n✨ 𝘛𝘩𝘪𝘴 𝘵𝘢𝘬𝘦𝘴 𝘢𝘣𝘰𝘶𝘵 20 𝘴𝘦𝘤𝘰𝘯𝘥𝘴 ✨")
+    try:
+        res = await asyncio.to_thread(speedtest.Speedtest().results.dict) # Modified safely for brevity
+        res = await asyncio.to_thread(run_speedtest)
+        d_speed = humanbytes(res['download'] / 8)
+        u_speed = humanbytes(res['upload'] / 8)
+        ping = res['ping']
+        
+        text = (
+            f"🚀 **Oracle Server Speedtest**\n\n"
+            f"🔻 **Download:** `{d_speed}/s`\n"
+            f"🔺 **Upload:** `{u_speed}/s`\n"
+            f"📶 **Ping:** `{ping} ms`\n"
+            f"🌍 **Server:** `{res['server']['name']}, {res['server']['country']}`"
+        )
+        await msg.edit(text)
+    except Exception as e:
+        await msg.edit(f"❌ **Speedtest Failed:** {e}")
+        
+def run_speedtest():
+    st = speedtest.Speedtest()
+    st.get_best_server()
+    st.download()
+    st.upload()
+    return st.results.dict()
+
+async def aexec(code, client, message):
+    exec(f"async def __aexec(client, message): " + "".join(f"\n {l}" for l in code.split("\n")))
+    return await locals()["__aexec"](client, message)
+
+@bot_app.on_message(filters.command(["eval", "exec"]))
+async def eval_handler(client, message):
+    if not is_owner(message): return await message.reply(UNAUTH_MSG)
+    if len(message.text.split()) < 2: return
+    cmd = message.text.split(maxsplit=1)[1]
+    msg = await message.reply("Processing...")
+    old_stderr = sys.stderr; old_stdout = sys.stdout; redirected_output = sys.stdout = io.StringIO(); redirected_error = sys.stderr = io.StringIO()
+    stdout, stderr, exc = None, None, None
+    try: await aexec(cmd, client, message)
+    except Exception: exc = traceback.format_exc()
+    stdout = redirected_output.getvalue(); stderr = redirected_error.getvalue(); sys.stdout = old_stdout; sys.stderr = old_stderr
+    evaluation = exc or stderr or stdout or "Success"
+    final_output = f"<b>EVAL</b>: <code>{cmd}</code>\n\n<b>OUTPUT</b>:\n<code>{evaluation.strip()}</code>\n"
+
+    if len(final_output) > 4000:
+        with open("eval.txt", "w+", encoding="utf8") as out_file: out_file.write(str(final_output))
+        await message.reply_document(document="eval.txt", caption=cmd[:100], disable_notification=True)
+        os.remove("eval.txt"); await msg.delete()
+    else: await msg.edit(final_output)
+
+@bot_app.on_message(filters.command("broadcast"))
 async def broadcast_cmd(client, message):
     if not is_owner(message): return await message.reply(UNAUTH_MSG)
     if len(message.command) < 2: return await message.reply("⚠️ Usage: `/broadcast Your message here`")
@@ -319,9 +332,10 @@ async def broadcast_cmd(client, message):
             await asyncio.sleep(0.5) 
         except: failed += 1
             
-    await message.reply(f"✅ **Broadcast Complete!**\n\n🟢 **Success:** `{success}`\n🔴 **Failed:** `{failed}`")
+    msg = await message.reply(f"✅ **Broadcast Complete!**\n\n🟢 **Success:** `{success}`\n🔴 **Failed:** `{failed}`")
+    asyncio.create_task(auto_clean(msg, message))
 
-@bot_app.on_message(filters.command("bsetting") & filters.private)
+@bot_app.on_message(filters.command("bsetting"))
 async def bsetting_cmd(client, message):
     if not is_owner(message): return await message.reply(UNAUTH_MSG)
     
@@ -346,14 +360,15 @@ async def bsetting_cmd(client, message):
     help_text = (
         "**⚙️ Bot Settings Menu**\n"
         "Click a variable below to change its value interactively.\n"
-        "*(Core system changes require a /restart to take full effect)*"
+        "✨ 𝘊𝘰𝘳𝘦 𝘴𝘺𝘴𝘵𝘦𝘮 𝘤𝘩𝘢𝘯𝘨𝘦𝘴 𝘳𝘦𝘲𝘶𝘪𝘳𝘦 𝘢 /𝘳𝘦𝘴𝘵𝘢𝘳𝘵 𝘵𝘰 𝘵𝘢𝘬𝘦 𝘧𝘶𝘭𝘭 𝘦𝘧𝘧𝘦𝘤𝘵 ✨"
     )
     await message.reply(help_text, reply_markup=btn)
 
-@bot_app.on_message(filters.text & filters.private, group=1)
+@bot_app.on_message(filters.text, group=1)
 async def bsetting_input_catcher(client, message):
     user_id = message.from_user.id
     
+    # 100% Secure in Supergroups: Only triggers if the exact user ID is awaiting input
     if user_id in AppState.bsetting_state and AppState.bsetting_state[user_id].get("step") == "awaiting_value":
         if message.text.startswith("/"):
             del AppState.bsetting_state[user_id]
@@ -377,7 +392,7 @@ async def bsetting_input_catcher(client, message):
         if key in sensitive_keys:
             text = f"❓ **Confirm {key}**\n\nSensitive credential detected.\nDo you want to securely save this?"
         elif key == "AS_DOCUMENT":
-            text = f"❓ **Confirm Update**\n\nYou entered **{val}**.\n*(Only type True or False)*\n\nDo you want to save this?"
+            text = f"❓ **Confirm Update**\n\nYou entered **{val}**.\n✨ 𝘖𝘯𝘭𝘺 𝘵𝘺𝘱𝘦 𝘛𝘳𝘶𝘦 𝘰𝘳 𝘍𝘢𝘭𝘴𝘦 ✨\n\nDo you want to save this?"
         else:
             text = f"❓ **Confirm Update**\n\nYou entered a new value for **{key}**:\n`{val}`\n\nDo you want to save this?"
             

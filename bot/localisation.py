@@ -26,7 +26,7 @@ class Localisation:
     
     # --- SMART TEXT ERRORS & LIMITS ---
     INVALID_THUMB = "❌ <b>No Custom ThumbNail Found.</b>\n⚠️ Please reply to a valid Image (JPG/PNG) to set it as a thumbnail."
-    FILE_SIZE_LIMIT = "⚠️ <b>Telegram API Limit Reached!</b>\nDetected File Size: <b>{}</b>.\n\n*(Telegram restricts bot uploads to 4.0GB maximum. Compression cannot proceed for this file.)*"
+    FILE_SIZE_LIMIT = "⚠️ <b>Telegram API Limit Reached!</b>\nDetected File Size: <b>{}</b>.\n\n✨ 𝘛𝘦𝘭𝘦𝘨𝘳𝘢𝘮 𝘳𝘦𝘴𝘵𝘳𝘪𝘤𝘵𝘴 𝘣𝘰𝘵 𝘶𝘱𝘭𝘰𝘢𝘥𝘴 𝘵𝘰 4.0𝘎𝘉 𝘮𝘢𝘹𝘪𝘮𝘶𝘮. 𝘊𝘰𝘮𝘱𝘳𝘦𝘴𝘴𝘪𝘰𝘯 𝘤𝘢𝘯𝘯𝘰𝘵 𝘱𝘳𝘰𝘤𝘦𝘦𝘥 𝘧𝘰𝘳 𝘵𝘩𝘪𝘴 𝘧𝘪𝘭𝘦. ✨"
     
     # --- NEW: FAILURE STATES ---
     COMPRESS_FAILED = "⚠️ <b>Compression Failed</b> ⚠️"
@@ -46,4 +46,4 @@ class Localisation:
     
     # --- SAMPLE GEN TEXTS ---
     SAMPLE_BUSY = "⚠️ **Bot is Busy!**\nCannot generate a sample while a compression task is running or in queue."
-    SAMPLE_GENERATING = "✂️ **Generating Random 30-Second Sample...**\n*(This will take a moment depending on file size)*"
+    SAMPLE_GENERATING = "✂️ **Generating Random 30-Second Sample...**\n✨ 𝘛𝘩𝘪𝘴 𝘸𝘪𝘭𝘭 𝘵𝘢𝘬𝘦 𝘢 𝘮𝘰𝘮𝘦𝘯𝘵 𝘥𝘦𝘱𝘦𝘯𝘥𝘪𝘯𝘨 𝘰𝘯 𝘧𝘪𝘭𝘦 𝘴𝘪𝘻𝘦 ✨"

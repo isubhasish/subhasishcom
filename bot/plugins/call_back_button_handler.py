@@ -70,10 +70,14 @@ async def panel_handler(client, cb):
 # --- INTERACTIVE BSETTING HANDLERS ---
 @bot_app.on_callback_query(filters.regex(r"^bsetting_(.*)"))
 async def bsetting_cb(client, cb):
-    action = cb.matches[0].group(1)
     user_id = cb.from_user.id
+    
+    # 🔒 Strict Owner Lock for Supergroups!
+    if user_id != config_data["OWNER_ID"]:
+        return await cb.answer("⚠️ Only the Owner can use these buttons!", show_alert=True)
+        
+    action = cb.matches[0].group(1)
 
-    # The Elite Dynamic Regex Toggle
     if action.startswith("toggle_"):
         key = action.replace("toggle_", "")
         default_val = True if key == "AS_DOCUMENT" else False
@@ -84,7 +88,7 @@ async def bsetting_cb(client, cb):
         
         await cb.answer(f"✅ {key} instantly changed to {not current_val}!", show_alert=True)
         await cb.message.edit(
-            f"**⚙️ Bot Settings Menu**\n✅ Successfully toggled `{key}` to `{not current_val}`\n*(Core system changes require a /restart to take full effect)*",
+            f"**⚙️ Bot Settings Menu**\n✅ Successfully toggled `{key}` to `{not current_val}`\n✨ 𝘊𝘰𝘳𝘦 𝘴𝘺𝘴𝘵𝘦𝘮 𝘤𝘩𝘢𝘯𝘨𝘦𝘴 𝘳𝘦𝘲𝘶𝘪𝘳𝘦 𝘢 /𝘳𝘦𝘴𝘵𝘢𝘳𝘵 𝘵𝘰 𝘵𝘢𝘬𝘦 𝘧𝘶𝘭𝘭 𝘦𝘧𝘧𝘦𝘤𝘵 ✨",
             reply_markup=get_bsetting_menu()
         )
         return
@@ -101,7 +105,7 @@ async def bsetting_cb(client, cb):
         btn = InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="bsetting_back"), InlineKeyboardButton("❌ Close", callback_data="bsetting_close")]])
         
         if key == "WATERMARK_TEXT":
-            await cb.message.edit(f"📝 **Editing {key}**\n\n**Current Value:** `{current_val}`\n\n👇 **Send your Watermark text.**\n*(Type `None` to remove the watermark)*", reply_markup=btn)
+            await cb.message.edit(f"📝 **Editing {key}**\n\n**Current Value:** `{current_val}`\n\n👇 **Send your Watermark text.**\n✨ 𝘛𝘺𝘱𝘦 𝘕𝘰𝘯𝘦 𝘵𝘰 𝘳𝘦𝘮𝘰𝘷𝘦 𝘵𝘩𝘦 𝘸𝘢𝘵𝘦𝘳𝘮𝘢𝘳𝘬 ✨", reply_markup=btn)
         else:
             await cb.message.edit(f"📝 **Editing {key}**\n\n**Current Value:** `{current_val}`\n\n👇 **Send the new value as a normal message now.**", reply_markup=btn)
 
@@ -140,13 +144,19 @@ async def bsetting_cb(client, cb):
         help_text = (
             "**⚙️ Bot Settings Menu**\n"
             "Click a variable below to change its value interactively.\n"
-            "*(Core system changes require a /restart to take full effect)*"
+            "✨ 𝘊𝘰𝘳𝘦 𝘴𝘺𝘴𝘵𝘦𝘮 𝘤𝘩𝘢𝘯𝘨𝘦𝘴 𝘳𝘦𝘲𝘶𝘪𝘳𝘦 𝘢 /𝘳𝘦𝘴𝘵𝘢𝘳𝘵 𝘵𝘰 𝘵𝘢𝘬𝘦 𝘧𝘶𝘭𝘭 𝘦𝘧𝘧𝘦𝘤𝘵 ✨"
         )
         await cb.message.edit(help_text, reply_markup=get_bsetting_menu())
 
 # --- THUMBNAIL & CANCEL HANDLERS ---
 @bot_app.on_callback_query(filters.regex(r"^delthumb_(.*)"))
 async def delthumb_cb(client, cb):
+    user_id = cb.from_user.id
+    
+    # 🔒 Strict Owner Lock
+    if user_id != config_data["OWNER_ID"]:
+        return await cb.answer("⚠️ Only the Owner can delete thumbnails!", show_alert=True)
+
     action = cb.matches[0].group(1)
     if action == "yes":
         path = os.path.join(Config.THUMB_DIR, f"{cb.from_user.id}.jpg")
