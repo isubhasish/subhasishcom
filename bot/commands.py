@@ -51,6 +51,7 @@ async def ping_cmd(client, message):
     msg = await message.reply("...")
     end_t = time.time()
     ping_ms = round((end_t - start_t) * 1000)
+    # The string literal bug is permanently fixed here:
     await msg.edit(f"📶Pɪɴɢ = {ping_ms}ms\n⏰ **Uptime:** `{get_uptime()}`")
 
 # ==========================================
