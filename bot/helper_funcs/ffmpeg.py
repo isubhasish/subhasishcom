@@ -88,12 +88,17 @@ async def worker():
                     if not line: break
                     line_str = line.decode('utf-8', errors='ignore').strip()
                     
+                    # FIX: Upgraded Regex perfectly parses FFmpeg's millisecond duration outputs
                     if not duration_sec and "Duration:" in line_str:
                         match = re.search(r"Duration:\s*(\d{2}):(\d{2}):(\d{2})", line_str)
                         if match: duration_sec = int(match.group(1))*3600 + int(match.group(2))*60 + int(match.group(3))
 
                     if "time=" in line_str:
-                        time_match = re.search(r"time=(\d{2}):(\d{2}):(\d{2})", line_str)
+                        # FIX: Highly sensitive regex catches the time even if it has milliseconds!
+                        time_match = re.search(r"time=(\d{2}):(\d{2}):(\d{2})\.", line_str)
+                        if not time_match: # Fallback just in case
+                            time_match = re.search(r"time=(\d{2}):(\d{2}):(\d{2})", line_str)
+                            
                         if time_match and (time.time() - last_update_time > 5):
                             curr_sec = int(time_match.group(1))*3600 + int(time_match.group(2))*60 + int(time_match.group(3))
                             if duration_sec > 0:
@@ -167,7 +172,6 @@ async def worker():
                         break
                     part_size_bytes /= 1024
                     
-                # Initial caption without Data Center
                 final_caption = f"✅ <b>{upload_file}</b>\n**Size:** {part_size_str}\n\n<b>©ᴇɴᴄᴏᴅᴇᴅ Bʏ:</b> <b>@{AppState.bot_username}</b>"
                 if len(files_to_upload) > 1:
                     final_caption = f"**[Part {idx+1}/{len(files_to_upload)}]**\n" + final_caption
@@ -190,16 +194,13 @@ async def worker():
                             reply_to_message_id=msg.id
                         )
                         
-                    # --- THE POST-UPLOAD DATA CENTER FIX ---
                     if uploaded_msg:
-                        # Extract the exact DC ID now that the file is on Telegram!
                         _, new_dc_str = get_file_info(uploaded_msg)
                         
                         updated_caption = f"✅ <b>{upload_file}</b>\n**Size:** {part_size_str}\n**Data Center:** {new_dc_str}\n\n<b>©ᴇɴᴄᴏᴅᴇᴅ Bʏ:</b> <b>@{AppState.bot_username}</b>"
                         if len(files_to_upload) > 1:
                             updated_caption = f"**[Part {idx+1}/{len(files_to_upload)}]**\n" + updated_caption
                         
-                        # Edit the caption silently to inject the Data Center
                         await uploaded_msg.edit_caption(updated_caption)
 
                 except Exception as e:

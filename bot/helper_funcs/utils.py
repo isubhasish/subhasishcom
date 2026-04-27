@@ -1,6 +1,7 @@
 import asyncio
 import time
 from datetime import datetime, timezone, timedelta
+from pyrogram.file_id import FileId
 from bot.__init__ import bot_app, logger, config_data
 
 queue = asyncio.Queue()
@@ -54,7 +55,7 @@ def get_network_io():
     recv = net.bytes_recv
     return sent, recv
 
-# --- NEW: DATA CENTER & SIZE EXTRACTOR ---
+# --- FIX: 100% ACCURATE DATA CENTER EXTRACTOR ---
 def get_file_info(message):
     media = message.video or message.document
     if not media: return "Unknown", "Unknown"
@@ -69,18 +70,19 @@ def get_file_info(message):
                 break
             size_bytes /= 1024
             
-    # Extract DC ID
-    # Pyrogram stores file references in string format. The DC ID is usually embedded.
+    # Extract Accurate DC ID using Pyrogram's native FileId object
     try:
-        file_id = media.file_id
-        import base64
-        import struct
-        decoded = base64.urlsafe_b64decode(file_id + '=' * (-len(file_id) % 4))
-        dc_id = struct.unpack('<q', decoded[0:8])[0] & 0xFF
-        dc_name = f"DC{dc_id}"
-        # Optional Map for aesthetics based on standard Telegram DCs
-        dc_map = {1: "Miami, USA - DC1", 2: "Amsterdam, NL - DC2", 3: "Miami, USA - DC3", 4: "Amsterdam, NL - DC4", 5: "Singapore, SG - DC5"}
-        dc_str = dc_map.get(dc_id, dc_name)
+        file_id_obj = FileId.decode(media.file_id)
+        dc_id = file_id_obj.dc_id
+        
+        dc_map = {
+            1: "Miami, USA - DC1", 
+            2: "Amsterdam, NL - DC2", 
+            3: "Miami, USA - DC3", 
+            4: "Amsterdam, NL - DC4", 
+            5: "Singapore, SG - DC5"
+        }
+        dc_str = dc_map.get(dc_id, f"DC{dc_id}")
     except:
         dc_str = "Unknown DC"
         

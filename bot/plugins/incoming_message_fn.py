@@ -32,7 +32,6 @@ async def incoming_file(client, message):
     name = (message.video or message.document).file_name or "video.mp4"
     AppState.pending_tasks[tid] = {"msg": message, "name": name}
     
-    # --- NEW UI ALIGNMENT ---
     size_str, dc_str = get_file_info(message)
     
     btn = InlineKeyboardMarkup([
@@ -52,17 +51,31 @@ async def incoming_file(client, message):
     else:
         await message.reply(text, reply_markup=btn)
 
-
 @bot_app.on_message(filters.reply)
 async def index_receiver(client, message):
     if not is_sudo(message): return
     
-    tid = AppState.awaiting_index.pop(message.chat.id, None)
-    if tid and tid in AppState.pending_tasks:
-        task = AppState.pending_tasks.pop(tid)
-        map_args = []
-        for idx in message.text.split(','): 
-            map_args.extend(["-map", f"0:{idx.strip()}"])
+    # FIX: Extract the dictionary we saved during the callback
+    awaiting_data = AppState.awaiting_index.pop(message.chat.id, None)
+    if awaiting_data:
+        tid = awaiting_data.get("tid")
+        menu_msg_id = awaiting_data.get("menu_msg_id")
         
-        await queue.put((task['msg'], task['name'], map_args, message))
-        await message.reply(QUEUE_MSG)
+        if tid and tid in AppState.pending_tasks:
+            task = AppState.pending_tasks.pop(tid)
+            map_args = []
+            for idx in message.text.split(','): 
+                map_args.extend(["-map", f"0:{idx.strip()}"])
+            
+            # FIX: Perfectly delete the Stream Menu, the ForceReply Prompt, AND the user's typed numbers!
+            try:
+                messages_to_delete = [
+                    menu_msg_id,                   # Deletes the Main Stream list
+                    message.reply_to_message.id,   # Deletes the "Reply with indexes..." prompt
+                    message.id                     # Deletes the message where you typed "0,1"
+                ]
+                await client.delete_messages(chat_id=message.chat.id, message_ids=messages_to_delete)
+            except: pass
+
+            await queue.put((task['msg'], task['name'], map_args, message))
+            await message.reply(QUEUE_MSG)

@@ -39,21 +39,21 @@ async def panel_handler(client, cb):
         await cb.message.edit("📝 Probing MediaInfo...")
         chunk_path = f"probe_{tid}.mkv"
         
-        # --- FIX: Robust Error Catching prevents the button from spinning infinitely ---
         try:
             with open(chunk_path, "wb") as f:
                 dl_size = 0
                 async for chunk in user_app.stream_media(task['msg']):
                     f.write(chunk)
                     dl_size += len(chunk)
-                    if dl_size >= 5 * 1024 * 1024:  # 5MB Limit
+                    if dl_size >= 5 * 1024 * 1024:
                         break
                         
             raw_info = os.popen(f"mediainfo {chunk_path}").read()
             formatted_info = raw_info.replace("General\n", "📄 General\n").replace("Video\n", "🎬 Video\n").replace("Audio\n", "🔊 Audio\n").replace("Text\n", "💬 Subtitle\n").replace("Menu\n", "📑 Menu\n")
             
             link = await get_graph_link(formatted_info, "Subhasish Encoder Mediainfo", "Subhasish Encoder")
-            await cb.message.edit(f"📊 **MediaInfo Link:**\n{link}", disable_web_page_preview=True)
+            # FIX: Send raw URL to trigger Telegram's native Instant View Preview!
+            await cb.message.edit(f"📊 **MediaInfo Link:**\n{link}")
         except Exception as e:
             await cb.message.edit(f"❌ **MediaInfo Error:** `{e}`")
         finally:
@@ -67,14 +67,13 @@ async def panel_handler(client, cb):
         await cb.message.edit("⏳ Fetching Stream List...")
         chunk_path = f"probe_{tid}.mkv"
         
-        # --- FIX: Robust Error Catching prevents the button from spinning infinitely ---
         try:
             with open(chunk_path, "wb") as f:
                 dl_size = 0
                 async for chunk in user_app.stream_media(task['msg']):
                     f.write(chunk)
                     dl_size += len(chunk)
-                    if dl_size >= 5 * 1024 * 1024:  # 5MB Limit
+                    if dl_size >= 5 * 1024 * 1024:
                         break
                         
             streams = os.popen(f"ffprobe -v error -show_entries stream=index,codec_type,codec_name:stream_tags=language -of json {chunk_path}").read()
@@ -90,8 +89,8 @@ async def panel_handler(client, cb):
             if os.path.exists(chunk_path): os.remove(chunk_path)
 
     elif action == "input":
-        AppState.awaiting_index[cb.message.chat.id] = tid
-        await cb.message.delete()
+        # FIX: Remove 'await cb.message.delete()' so the user can read the tracks!
+        AppState.awaiting_index[cb.message.chat.id] = {"tid": tid, "menu_msg_id": cb.message.id}
         await bot_app.send_message(cb.message.chat.id, "Reply with indexes (e.g. 0,2,4):", reply_markup=ForceReply(selective=True))
 
 # --- INTERACTIVE BSETTING HANDLERS ---

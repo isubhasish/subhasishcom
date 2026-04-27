@@ -33,7 +33,6 @@ def get_uptime():
     uptime_ms = int((time.time() - START_TIME) * 1000)
     return get_readable_time(uptime_ms)
 
-# --- THE ULTIMATE AUTO-CLEAN FUNCTION ---
 async def auto_clean(msg, message):
     await asyncio.sleep(30)
     if AppState.active_file_name == "None" and queue.qsize() == 0:
@@ -136,7 +135,8 @@ async def log_cmd(client, message):
         with open("bot.log", "r") as f: log_data = f.read()[-30000:] 
         if not log_data: return await msg.edit("⚠️ Log file is empty.")
         link = await get_graph_link(log_data, "Subhasish Encoder Logs", "Subhasish Encoder")
-        await msg.edit(f"📝 **Bot Logs:**\n{link}", disable_web_page_preview=True)
+        # FIX: Send raw URL to trigger Telegram's native Instant View Preview!
+        await msg.edit(f"📝 **Bot Logs:**\n{link}")
     except Exception as e: await msg.edit(f"❌ Failed to fetch logs: {e}")
 
 @bot_app.on_message(filters.command("mediainfo"))
@@ -155,7 +155,8 @@ async def mediainfo_cmd(client, message):
         formatted_info = raw_info.replace("General\n", "📄 General\n").replace("Video\n", "🎬 Video\n").replace("Audio\n", "🔊 Audio\n").replace("Text\n", "💬 Subtitle\n").replace("Menu\n", "📑 Menu\n")
         os.remove(chunk_path)
         link = await get_graph_link(formatted_info, "Subhasish Encoder Mediainfo", "Subhasish Encoder")
-        await msg.edit(f"📊 **MediaInfo Link:**\n{link}", disable_web_page_preview=True)
+        # FIX: Send raw URL to trigger Telegram's native Instant View Preview!
+        await msg.edit(f"📊 **MediaInfo Link:**\n{link}")
     except Exception as e:
         await msg.edit(f"❌ Error: {e}")
         if os.path.exists(chunk_path): os.remove(chunk_path)
@@ -229,7 +230,6 @@ async def restart_cmd(client, message):
     if not is_sudo(message): return await message.reply(UNAUTH_MSG)
     msg = await message.reply("🔄 **Restarting the server now...**")
     with open("restart.json", "w") as f: json.dump({"chat_id": msg.chat.id, "message_id": msg.id}, f)
-    # --- FIX: FORCE STRICT MODULE EXECUTION TO PREVENT IMPORT ERRORS ---
     os.execl(sys.executable, sys.executable, "-m", "bot")
 
 # ==========================================
