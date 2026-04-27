@@ -48,10 +48,33 @@ Build and Run the Bot.
 ```sh
 sudo docker-compose up -d --build
 ```
+
+------
+
+
 ### Check Live Logs
 Included Beautiful Custom Boot Sequence.
 ```sh
 sudo docker logs -f subhasish_compressor
+```
+
+------
+
+
+### Rebuid The Bot In PuTTY After Making Any Changes In Github Repo
+Go to your Putty terminal inside your aiencoder folder and run the clean rebuild command sequence.
+```sh
+cd aiencoder
+```
+```
+sudo docker-compose down --rmi all
+```
+```
+git pull
+```
+- Run Again The Advanced Build Command Like Before After Github Is Updated Our Folder/Files.
+```
+sudo docker-compose up -d --build
 ```
 
 ------
