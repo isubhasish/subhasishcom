@@ -1,6 +1,8 @@
 FROM python:3.10-slim
 
-# 1. Added build-essential and python3-dev to compile TgCrypto on Oracle ARM processors
+# Silence the red debconf warnings
+ENV DEBIAN_FRONTEND=noninteractive 
+
 RUN apt-get update && apt-get install -y \
     ffmpeg \
     mediainfo \
@@ -10,10 +12,10 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
-
 COPY requirements.txt .
 
-# 2. Installs the Python requirements safely
+# This is the magic line! It upgrades pip inside the container BEFORE installing requirements
+RUN pip3 install --upgrade pip
 RUN pip3 install --no-cache-dir -r requirements.txt
 
 COPY . .
