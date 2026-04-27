@@ -22,7 +22,9 @@ UNAUTH_MSG = "<b>Opps You Need To Donate Some Amount To Use Meh...🐸👀</b>"
 
 def is_sudo(message):
     user_id = message.from_user.id if message.from_user else 0
-    return user_id in config_data["AUTH_USERS"] or user_id == config_data["OWNER_ID"]
+    chat_id = message.chat.id
+    # Checks if EITHER the user OR the group is authorized
+    return user_id in config_data["AUTH_USERS"] or user_id == config_data["OWNER_ID"] or chat_id in config_data["AUTH_USERS"]
 
 def is_owner(message):
     user_id = message.from_user.id if message.from_user else 0
