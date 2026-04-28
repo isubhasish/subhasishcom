@@ -34,7 +34,6 @@ async def incoming_file(client, message):
     
     size_str, dc_str = get_file_info(message)
     
-    # FIX: Added the ❌ Close button to perfectly execute your safety wipe
     btn = InlineKeyboardMarkup([
         [InlineKeyboardButton("📊 MediaInfo", callback_data=f"panel_info_{tid}"), InlineKeyboardButton("✂️ Stream Select", callback_data=f"panel_select_{tid}")],
         [InlineKeyboardButton("▶️ Compress (Default)", callback_data=f"panel_all_{tid}")],
@@ -77,5 +76,6 @@ async def index_receiver(client, message):
                 await client.delete_messages(chat_id=message.chat.id, message_ids=messages_to_delete)
             except: pass
 
-            await queue.put((task['msg'], task['name'], map_args, message))
-            await message.reply(QUEUE_MSG)
+            # FIX: Create a dedicated status message for the worker so it NEVER crashes
+            new_status_msg = await bot_app.send_message(message.chat.id, QUEUE_MSG)
+            await queue.put((task['msg'], task['name'], map_args, new_status_msg))

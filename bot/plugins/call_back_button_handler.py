@@ -35,7 +35,6 @@ async def panel_handler(client, cb):
     task = AppState.pending_tasks.get(tid)
     if not task: return await cb.answer("Task Expired", show_alert=True)
 
-    # --- FIX: Executing the Safe Wiping Protocol when Close is clicked ---
     if action == "close":
         AppState.pending_tasks.pop(tid, None)
         try:
@@ -61,29 +60,57 @@ async def panel_handler(client, cb):
             size_str, _ = get_file_info(task['msg'])
             raw_info = os.popen(f"mediainfo {chunk_path}").read()
             
-            formatted_info = f"<b>{task['name']}</b><br><b>Size:</b> {size_str}<br><br>"
-            formatted_info += raw_info.replace(
-                "General\n", "<b>📄 General</b><br>"
+            # FIX: Create a beautiful HTML layout, but wrap the raw data in a <pre> tag
+            # so Telegraph preserves the exact formatting and spacing perfectly!
+            header = f"<b>{task['name']}</b><br><b>Size:</b> {size_str}<br><br>"
+            body = raw_info.replace(
+                "General\n", "<b>📄 General</b>\n"
             ).replace(
-                "\nVideo\n", "<br><br><b>🎬 Video</b><br>"
+                "\nVideo\n", "\n<b>🎬 Video</b>\n"
             ).replace(
-                "\nAudio\n", "<br><br><b>🔊 Audio</b><br>"
+                "\nAudio\n", "\n<b>🔊 Audio</b>\n"
             ).replace(
-                "\nText\n", "<br><br><b>💬 Subtitle</b><br>"
+                "\nText\n", "\n<b>💬 Subtitle</b>\n"
             ).replace(
-                "\nMenu\n", "<br><br><b>📑 Menu</b><br>"
-            ).replace("\n", "<br>")
+                "\nMenu\n", "\n<b>📑 Menu</b>\n"
+            )
             
-            link = await get_graph_link(formatted_info, "Subhasish Encoder Mediainfo", "Subhasish Encoder")
-            await cb.message.edit(f"📊 **MediaInfo Link:**\n{link}")
+            # We send the header as raw HTML, but the body wrapped in preformatted text
+            final_content = [{"tag": "p", "children": [header]}, {"tag": "pre", "children": [body]}]
+            
+            # We bypass the helper func here to explicitly send complex JSON structure
+            import httpx
+            async with httpx.AsyncClient() as http_client:
+                acc_resp = await http_client.get("https://api.telegra.ph/createAccount?short_name=SubhasishEncoder&author_name=Subhasish")
+                token = acc_resp.json().get("result", {}).get("access_token")
+                if token:
+                    payload = {
+                        "access_token": token,
+                        "title": "Subhasish Encoder Mediainfo", 
+                        "author_name": "Subhasish Encoder",
+                        "content": final_content, 
+                        "return_content": True
+                    }
+                    r = await http_client.post("https://api.telegra.ph/createPage", json=payload)
+                    url = r.json().get("result", {}).get("url", "").replace("telegra.ph", "graph.org")
+                    if url:
+                        await cb.message.edit(f"📊 **MediaInfo Link:**\n{url}")
+                    else:
+                        await cb.message.edit("❌ Telegraph API Error.")
+                else:
+                    await cb.message.edit("❌ Telegraph Auth Error.")
+                    
         except Exception as e:
             await cb.message.edit(f"❌ **MediaInfo Error:** `{e}`")
         finally:
             if os.path.exists(chunk_path): os.remove(chunk_path)
 
     elif action == "all":
-        await queue.put((task['msg'], task['name'], ["-map", "0"], cb.message))
-        await cb.message.edit(QUEUE_MSG)
+        # FIX: Generate a Safe, Dedicated Status message
+        try: await cb.message.delete()
+        except: pass
+        new_status_msg = await bot_app.send_message(cb.message.chat.id, QUEUE_MSG)
+        await queue.put((task['msg'], task['name'], ["-map", "0"], new_status_msg))
 
     elif action == "select":
         await cb.message.edit("⏳ Fetching Stream List...")
