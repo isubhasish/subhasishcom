@@ -68,14 +68,10 @@ async def index_receiver(client, message):
                 map_args.extend(["-map", f"0:{idx.strip()}"])
             
             try:
-                messages_to_delete = [
-                    menu_msg_id,                   
-                    message.reply_to_message.id,   
-                    message.id                     
-                ]
+                messages_to_delete = [menu_msg_id, message.reply_to_message.id, message.id]
                 await client.delete_messages(chat_id=message.chat.id, message_ids=messages_to_delete)
             except: pass
 
-            # FIX: Create a dedicated status message for the worker so it NEVER crashes
-            new_status_msg = await bot_app.send_message(message.chat.id, QUEUE_MSG)
+            # FIX: Message flawlessly replies directly to the original video!
+            new_status_msg = await bot_app.send_message(message.chat.id, QUEUE_MSG, reply_to_message_id=task['msg'].id)
             await queue.put((task['msg'], task['name'], map_args, new_status_msg))

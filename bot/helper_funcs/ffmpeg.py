@@ -46,7 +46,6 @@ async def worker():
                 await send_log(f"**Download Failed, Bot is Free Now !!** \n\nProcess Done at {get_ist()}\nError: {e}")
                 continue
             
-            # --- RESTORED: Download Success and Compress Start Edits! ---
             dl_time = int(time.time() - start_time)
             await status_msg.edit(Localisation.DOWNLOADED_SUCCESS.format(time_formatter(dl_time * 1000)))
             await send_log(f"**Download Stopped, Bot is Free Now !!** \n\nProcess Done at {get_ist()}")
@@ -57,8 +56,7 @@ async def worker():
             
             await status_msg.edit(Localisation.COMPRESS_START)
             await send_log(f"**Compressing Video ...** \n\nProcess Started at {get_ist()}")
-            await asyncio.sleep(1) # Extra buffer for Telegram API safety
-            # -----------------------------------------------------------
+            await asyncio.sleep(1) 
 
             res = str(config_data.get('RESOLUTION', '820x480')).lower().replace("x", ":")
             vf_filters = [f"scale={res}"]
@@ -79,7 +77,7 @@ async def worker():
                 "-y", out
             ]
             
-            duration_sec = 0
+            duration_sec = getattr(msg.video, 'duration', 0) if msg.video else 0
             encode_start_time = time.time()
             
             try:
@@ -88,46 +86,54 @@ async def worker():
                 last_update_time = time.time()
                 btn = InlineKeyboardMarkup([[InlineKeyboardButton("🛑 Cancel Task", callback_data="cancel_running")]])
 
+                line_buf = bytearray()
                 while True:
-                    line = await process.stderr.readline()
-                    if not line: break
-                    line_str = line.decode('utf-8', errors='ignore').strip()
-                    
-                    if not duration_sec and "Duration:" in line_str:
-                        match = re.search(r"Duration:\s*(\d{2}):(\d{2}):(\d{2})", line_str)
-                        if match: duration_sec = int(match.group(1))*3600 + int(match.group(2))*60 + int(match.group(3))
-
-                    if "time=" in line_str:
-                        time_match = re.search(r"time=(\d{2}):(\d{2}):(\d{2})\.", line_str)
-                        if not time_match: time_match = re.search(r"time=(\d{2}):(\d{2}):(\d{2})", line_str)
+                    chunk = await process.stderr.read(10)
+                    if not chunk: break
+                    for b in chunk:
+                        if b in (13, 10): 
+                            line_str = line_buf.decode('utf-8', errors='ignore').strip()
+                            line_buf.clear()
                             
-                        if time_match and (time.time() - last_update_time > 8):
-                            curr_sec = int(time_match.group(1))*3600 + int(time_match.group(2))*60 + int(time_match.group(3))
-                            if duration_sec > 0:
-                                percent = (curr_sec / duration_sec) * 100
-                                elapsed = time.time() - encode_start_time
-                                speed = curr_sec / elapsed if elapsed > 0 else 0
-                                eta = (duration_sec - curr_sec) / speed if speed > 0 else 0
-                                
-                                cpu, mem, disk = get_sys_stats()
-                                est_total_bytes = os.path.getsize(file_path) * 0.4 
-                                current_bytes = (percent/100) * est_total_bytes
+                            if not line_str: continue
 
-                                # FIX: Added bold formatting to phonetic text!
-                                text = (
-                                    f"ℹ️ **ɴᴏᴡ:** 💡 ENCODING... 💡\n\n"
-                                    f"⏱️ **ᴇᴛᴀ:** {time_formatter(eta*1000)}\n\n"
-                                    f"`{AppState.active_file_name}`\n"
-                                    f"[{make_bar(percent)}] {percent:.2f}%\n\n"
-                                    f"⚡️ **ꜱᴘᴇᴇᴅ:** {humanbytes((current_bytes/elapsed) if elapsed else 0)}/s\n"
-                                    f"⏰ **ᴇʟᴀᴘsᴇᴅ:** {time_formatter(elapsed*1000)}\n"
-                                    f"📦 **sɪᴢᴇ:** {humanbytes(current_bytes)} / {humanbytes(est_total_bytes)}\n\n"
-                                    f"🖥 CPU: {cpu}% | 💽 RAM: {mem}%"
-                                )
-                                try:
-                                    await status_msg.edit(text, reply_markup=btn)
-                                    last_update_time = time.time()
-                                except: pass
+                            if not duration_sec and "Duration:" in line_str:
+                                match = re.search(r"Duration:\s*(\d{2}):(\d{2}):(\d{2})", line_str)
+                                if match: duration_sec = int(match.group(1))*3600 + int(match.group(2))*60 + int(match.group(3))
+
+                            if "time=" in line_str:
+                                # FIX: The exact requested regex fallback restored perfectly!
+                                time_match = re.search(r"time=(\d{2}):(\d{2}):(\d{2})\.", line_str)
+                                if not time_match: time_match = re.search(r"time=(\d{2}):(\d{2}):(\d{2})", line_str)
+                                    
+                                if time_match and (time.time() - last_update_time > 8):
+                                    curr_sec = int(time_match.group(1))*3600 + int(time_match.group(2))*60 + int(time_match.group(3))
+                                    if duration_sec > 0:
+                                        percent = (curr_sec / duration_sec) * 100
+                                        elapsed = time.time() - encode_start_time
+                                        speed = curr_sec / elapsed if elapsed > 0 else 0
+                                        eta = (duration_sec - curr_sec) / speed if speed > 0 else 0
+                                        
+                                        cpu, mem, disk = get_sys_stats()
+                                        est_total_bytes = os.path.getsize(file_path) * 0.4 
+                                        current_bytes = (percent/100) * est_total_bytes
+
+                                        text = (
+                                            f"ℹ️ **ɴᴏᴡ:** 💡 ENCODING... 💡\n\n"
+                                            f"⏱️ **ᴇᴛᴀ:** {time_formatter(eta*1000)}\n\n"
+                                            f"`{AppState.active_file_name}`\n"
+                                            f"[{make_bar(percent)}] {percent:.2f}%\n\n"
+                                            f"⚡️ **ꜱᴘᴇᴇᴅ:** {humanbytes((current_bytes/elapsed) if elapsed else 0)}/s\n"
+                                            f"⏰ **ᴇʟᴀᴘsᴇᴅ:** {time_formatter(elapsed*1000)}\n"
+                                            f"📦 **sɪᴢᴇ:** {humanbytes(current_bytes)} / {humanbytes(est_total_bytes)}\n\n"
+                                            f"🖥 CPU: {cpu}% | 💽 RAM: {mem}%"
+                                        )
+                                        try:
+                                            await status_msg.edit(text, reply_markup=btn)
+                                            last_update_time = time.time()
+                                        except: pass
+                        else:
+                            line_buf.append(b)
 
                 await process.wait()
                 if AppState.current_process == process: AppState.current_process = None
@@ -165,7 +171,6 @@ async def worker():
 
             await send_log(f"**Uploading Video ...** \n\nProcess Started at {get_ist()}")
 
-            # NOTE: Your requested thumbnail generation code is safely executing right here!
             actual_thumb = custom_thumb if os.path.exists(custom_thumb) else None
             if not actual_thumb and files_to_upload: actual_thumb = await take_screen_shot(files_to_upload[0], Config.THUMB_DIR, 5)
 

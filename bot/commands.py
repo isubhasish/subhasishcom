@@ -8,12 +8,13 @@ import asyncio
 import traceback
 import gc
 import speedtest
+import re # FIX: Imported Regex to fix the MediaInfo dummy names
 from pyrogram import filters
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from bot.__init__ import bot_app, user_app, config_data
 from bot.config import Config
 from bot.localisation import Localisation
-from bot.helper_funcs.utils import AppState, queue, START_TIME, get_readable_time, send_log
+from bot.helper_funcs.utils import AppState, queue, START_TIME, get_readable_time, send_log, get_file_info
 from bot.helper_funcs.download import get_graph_link
 from bot.helper_funcs.display_progress import humanbytes
 
@@ -134,8 +135,9 @@ async def log_cmd(client, message):
     try:
         with open("bot.log", "r") as f: log_data = f.read()[-30000:] 
         if not log_data: return await msg.edit("⚠️ Log file is empty.")
-        link = await get_graph_link(log_data, "Subhasish Encoder Logs", "Subhasish Encoder")
-        # FIX: Send raw URL to trigger Telegram's native Instant View Preview!
+        content_json = [{"tag": "pre", "children": [log_data]}]
+        # FIX: Explicitly set "Subhasish Encoder" Author!
+        link = await get_graph_link(content_json, "Subhasish Encoder Logs", "Subhasish Encoder")
         await msg.edit(f"📝 **Bot Logs:**\n{link}")
     except Exception as e: await msg.edit(f"❌ Failed to fetch logs: {e}")
 
@@ -152,10 +154,36 @@ async def mediainfo_cmd(client, message):
     try:
         await user_app.download_media(message.reply_to_message, file_name=chunk_path)
         raw_info = os.popen(f"mediainfo {chunk_path}").read()
-        formatted_info = raw_info.replace("General\n", "📄 General\n").replace("Video\n", "🎬 Video\n").replace("Audio\n", "🔊 Audio\n").replace("Text\n", "💬 Subtitle\n").replace("Menu\n", "📑 Menu\n")
         os.remove(chunk_path)
-        link = await get_graph_link(formatted_info, "Subhasish Encoder Mediainfo", "Subhasish Encoder")
-        # FIX: Send raw URL to trigger Telegram's native Instant View Preview!
+        
+        # FIX: Extract actual Telegram size and name
+        size_str, _ = get_file_info(message.reply_to_message)
+        real_name = getattr(message.reply_to_message.video or message.reply_to_message.document, 'file_name', 'video.mp4')
+        
+        # FIX: Advanced Regex overrides the dummy chunk data with real Telegram data
+        raw_info = re.sub(r"Complete name\s+:\s+.*", f"Complete name                            : {real_name}", raw_info)
+        raw_info = re.sub(r"File size\s+:\s+.*", f"File size                                : {size_str}", raw_info)
+        
+        content_json = []
+        content_json.append({"tag": "h3", "children": [real_name]})
+        content_json.append({"tag": "hr"})
+
+        current_pre = ""
+        for line in raw_info.split('\n'):
+            clean_line = line.strip()
+            if clean_line in ["General", "Video", "Audio", "Text", "Menu"]:
+                if current_pre:
+                    content_json.append({"tag": "pre", "children": [current_pre]})
+                    current_pre = ""
+                icons = {"General": "📄", "Video": "🎬", "Audio": "🔊", "Text": "💬", "Menu": "📑"}
+                content_json.append({"tag": "h3", "children": [f"{icons.get(clean_line, '')} {clean_line}"]})
+            else:
+                if line.strip(): current_pre += line + "\n"
+        
+        if current_pre: content_json.append({"tag": "pre", "children": [current_pre]})
+            
+        # FIX: Explicitly set "Subhasish Encoder" Author!
+        link = await get_graph_link(content_json, "Subhasish Encoder Mediainfo", "Subhasish Encoder")
         await msg.edit(f"📊 **MediaInfo Link:**\n{link}")
     except Exception as e:
         await msg.edit(f"❌ Error: {e}")

@@ -1,5 +1,6 @@
 import os
 import json
+import re # FIX: Imported Regex to cleanly overwrite the dummy chunk data
 from pyrogram import filters
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ForceReply
 from bot.__init__ import bot_app, user_app, config_data
@@ -39,8 +40,7 @@ async def panel_handler(client, cb):
         AppState.pending_tasks.pop(tid, None)
         try:
             await cb.message.delete()
-            if 'msg' in task:
-                await task['msg'].delete()
+            if 'msg' in task: await task['msg'].delete()
         except: pass
         return
 
@@ -60,56 +60,42 @@ async def panel_handler(client, cb):
             size_str, _ = get_file_info(task['msg'])
             raw_info = os.popen(f"mediainfo {chunk_path}").read()
             
-            # FIX: Create a beautiful HTML layout, but wrap the raw data in a <pre> tag
-            # so Telegraph preserves the exact formatting and spacing perfectly!
-            header = f"<b>{task['name']}</b><br><b>Size:</b> {size_str}<br><br>"
-            body = raw_info.replace(
-                "General\n", "<b>📄 General</b>\n"
-            ).replace(
-                "\nVideo\n", "\n<b>🎬 Video</b>\n"
-            ).replace(
-                "\nAudio\n", "\n<b>🔊 Audio</b>\n"
-            ).replace(
-                "\nText\n", "\n<b>💬 Subtitle</b>\n"
-            ).replace(
-                "\nMenu\n", "\n<b>📑 Menu</b>\n"
-            )
+            # FIX: Regex violently overwrites the fake local chunk data with the true Telegram data
+            raw_info = re.sub(r"Complete name\s+:\s+.*", f"Complete name                            : {task['name']}", raw_info)
+            raw_info = re.sub(r"File size\s+:\s+.*", f"File size                                : {size_str}", raw_info)
             
-            # We send the header as raw HTML, but the body wrapped in preformatted text
-            final_content = [{"tag": "p", "children": [header]}, {"tag": "pre", "children": [body]}]
-            
-            # We bypass the helper func here to explicitly send complex JSON structure
-            import httpx
-            async with httpx.AsyncClient() as http_client:
-                acc_resp = await http_client.get("https://api.telegra.ph/createAccount?short_name=SubhasishEncoder&author_name=Subhasish")
-                token = acc_resp.json().get("result", {}).get("access_token")
-                if token:
-                    payload = {
-                        "access_token": token,
-                        "title": "Subhasish Encoder Mediainfo", 
-                        "author_name": "Subhasish Encoder",
-                        "content": final_content, 
-                        "return_content": True
-                    }
-                    r = await http_client.post("https://api.telegra.ph/createPage", json=payload)
-                    url = r.json().get("result", {}).get("url", "").replace("telegra.ph", "graph.org")
-                    if url:
-                        await cb.message.edit(f"📊 **MediaInfo Link:**\n{url}")
-                    else:
-                        await cb.message.edit("❌ Telegraph API Error.")
+            content_json = []
+            content_json.append({"tag": "h3", "children": [task['name']]})
+            content_json.append({"tag": "hr"})
+
+            current_pre = ""
+            for line in raw_info.split('\n'):
+                clean_line = line.strip()
+                if clean_line in ["General", "Video", "Audio", "Text", "Menu"]:
+                    if current_pre:
+                        content_json.append({"tag": "pre", "children": [current_pre]})
+                        current_pre = ""
+                    icons = {"General": "📄", "Video": "🎬", "Audio": "🔊", "Text": "💬", "Menu": "📑"}
+                    content_json.append({"tag": "h3", "children": [f"{icons.get(clean_line, '')} {clean_line}"]})
                 else:
-                    await cb.message.edit("❌ Telegraph Auth Error.")
-                    
+                    if line.strip(): 
+                        current_pre += line + "\n"
+            
+            if current_pre:
+                content_json.append({"tag": "pre", "children": [current_pre]})
+            
+            # FIX: Restored Author text exactly as requested!
+            link = await get_graph_link(content_json, title="Subhasish Encoder Mediainfo", author="Subhasish Encoder")
+            await cb.message.edit(f"📊 **MediaInfo Link:**\n{link}")
         except Exception as e:
             await cb.message.edit(f"❌ **MediaInfo Error:** `{e}`")
         finally:
             if os.path.exists(chunk_path): os.remove(chunk_path)
 
     elif action == "all":
-        # FIX: Generate a Safe, Dedicated Status message
         try: await cb.message.delete()
         except: pass
-        new_status_msg = await bot_app.send_message(cb.message.chat.id, QUEUE_MSG)
+        new_status_msg = await bot_app.send_message(cb.message.chat.id, QUEUE_MSG, reply_to_message_id=task['msg'].id)
         await queue.put((task['msg'], task['name'], ["-map", "0"], new_status_msg))
 
     elif action == "select":
