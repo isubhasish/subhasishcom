@@ -43,9 +43,16 @@ async def worker():
                     await send_log(f"**Download Error, Bot is Free Now !!** \n\nProcess Done at {get_ist()}\nReason: Path not exist")
                     continue
             except Exception as e:
-                await status_msg.edit(Localisation.DOWNLOAD_FAILED)
-                await send_log(f"**Download Failed, Bot is Free Now !!** \n\nProcess Done at {get_ist()}\nError: {e}")
-                continue
+                # FIX: If the user hit Cancel during download, completely abort the task!
+                if AppState.cancel_task or str(e) == "Task Cancelled by User":
+                    await status_msg.edit("⚠️ Task Cancelled by User.")
+                    await msg.reply("❌ **Task Cancelled.**", quote=True)
+                    if file_path and os.path.exists(file_path): os.remove(file_path)
+                    continue
+                else:
+                    await status_msg.edit(Localisation.DOWNLOAD_FAILED)
+                    await send_log(f"**Download Failed, Bot is Free Now !!** \n\nProcess Done at {get_ist()}\nError: {e}")
+                    continue
             
             dl_time = int(time.time() - start_time)
             await status_msg.edit(Localisation.DOWNLOADED_SUCCESS.format(time_formatter(dl_time * 1000)))
@@ -94,7 +101,6 @@ async def worker():
                         if AppState.current_process:
                             try:
                                 AppState.current_process.terminate()
-                                # FIX: THE ZOMBIE REAPER! Forces Python to collect the death certificate.
                                 await AppState.current_process.wait()
                             except: pass
                         raise Exception("Task Cancelled by User")
@@ -125,27 +131,20 @@ async def worker():
                                         eta = (duration_sec - curr_sec) / speed if speed > 0 else 0
                                         
                                         cpu, mem, disk = get_sys_stats()
-                                        sent, recv = get_network_io()
-                                        import psutil
-                                        free_disk_gb = round(psutil.disk_usage('/').free / (1024**3), 2)
-                                        uptime_str = get_readable_time((time.time() - START_TIME)*1000)
                                         
                                         est_total_bytes = os.path.getsize(file_path) * 0.4 
                                         current_bytes = (percent/100) * est_total_bytes
 
+                                        # FIX: Flawlessly restored your exclusive Phonetic Active UI!
                                         text = (
-                                            f"**🌐 Bᴏᴛ Sᴛᴀᴛɪsᴛɪᴄs 🌐**\n\n"
+                                            f"ℹ️ **ɴᴏᴡ:** 💡 ENCODING... 💡\n\n"
+                                            f"⏱️ **ᴇᴛᴀ:** {time_formatter(eta*1000)}\n\n"
                                             f"`{AppState.active_file_name}`\n"
-                                            f"[{make_bar(percent)}] {percent:.2f}%\n"
-                                            f"**Processed:** {humanbytes(current_bytes)} **of** {humanbytes(est_total_bytes)}\n"
-                                            f"**Status:** Encoding | **ETA:** {time_formatter(eta*1000)}\n"
-                                            f"**Speed:** {humanbytes((current_bytes/elapsed) if elapsed else 0)}/s | **Elapsed:** {time_formatter(elapsed*1000)}\n\n"
-                                            f"**📥 Files in Queue:** {queue.qsize()}\n\n"
-                                            f"**🖥 Hardware Info:**\n"
-                                            f"**CPU:** {cpu}% | **Free:** {free_disk_gb}GB ({100-disk}%)\n"
-                                            f"**In:** {humanbytes(recv)} | **Out:** {humanbytes(sent)}\n"
-                                            f"**Ram:** {mem}% | **Uptime:** {uptime_str}\n\n"
-                                            f"**🏷Maintained By: @Subhasish_bot**"
+                                            f"[{make_bar(percent)}] {percent:.2f}%\n\n"
+                                            f"⚡️ **ꜱᴘᴇᴇᴅ:** {humanbytes((current_bytes/elapsed) if elapsed else 0)}/s\n"
+                                            f"⏰ **ᴇʟᴀᴘsᴇᴅ:** {time_formatter(elapsed*1000)}\n"
+                                            f"📦 **sɪᴢᴇ:** {humanbytes(current_bytes)} / {humanbytes(est_total_bytes)}\n\n"
+                                            f"🖥 CPU: {cpu}% | 💽 RAM: {mem}%"
                                         )
                                         
                                         AppState.last_progress_text = text 
@@ -159,14 +158,22 @@ async def worker():
 
                 await process.wait()
                 if AppState.current_process == process: AppState.current_process = None
-                if process.returncode != 0: raise Exception("FFmpeg Process Crashed or Cancelled")
+                if process.returncode != 0: raise Exception("Task Cancelled by User")
                     
             except Exception as e:
-                await status_msg.edit(Localisation.COMPRESS_FAILED)
-                await send_log(f"**Compression Failed, Bot is Free Now !!** \n\nProcess Done at {get_ist()}\nError: {e}")
-                if file_path and os.path.exists(file_path): os.remove(file_path)
-                if out and os.path.exists(out): os.remove(out)
-                continue
+                # FIX: If the user hit Cancel during Compression, completely abort the task!
+                if AppState.cancel_task or str(e) == "Task Cancelled by User":
+                    await status_msg.edit("⚠️ Task Cancelled by User.")
+                    await msg.reply("❌ **Task Cancelled.**", quote=True)
+                    if file_path and os.path.exists(file_path): os.remove(file_path)
+                    if out and os.path.exists(out): os.remove(out)
+                    continue
+                else:
+                    await status_msg.edit(Localisation.COMPRESS_FAILED)
+                    await send_log(f"**Compression Failed, Bot is Free Now !!** \n\nProcess Done at {get_ist()}\nError: {e}")
+                    if file_path and os.path.exists(file_path): os.remove(file_path)
+                    if out and os.path.exists(out): os.remove(out)
+                    continue
 
             final_size = os.path.getsize(out)
             MAX_SIZE = 3950000000 if AppState.is_premium else 1950000000 
@@ -230,8 +237,15 @@ async def worker():
                         await uploaded_msg.edit_caption(updated_caption)
 
                 except Exception as e:
-                    await status_msg.edit(Localisation.UPLOAD_FAILED)
-                    await send_log(f"**Upload Stopped, Bot is Free Now !!** \n\nProcess Done at {get_ist()}\nError: {e}")
+                    # FIX: If the user hit Cancel during upload, completely abort the task!
+                    if AppState.cancel_task or str(e) == "Task Cancelled by User":
+                        await status_msg.edit("⚠️ Task Cancelled by User.")
+                        await msg.reply("❌ **Task Cancelled.**", quote=True)
+                        if os.path.exists(upload_file): os.remove(upload_file)
+                        continue
+                    else:
+                        await status_msg.edit(Localisation.UPLOAD_FAILED)
+                        await send_log(f"**Upload Stopped, Bot is Free Now !!** \n\nProcess Done at {get_ist()}\nError: {e}")
                 finally:
                     if os.path.exists(upload_file): os.remove(upload_file)
 

@@ -65,10 +65,13 @@ async def panel_handler(client, cb):
                         
             size_str, _ = get_file_info(task['msg'])
             
-            # FIX: Closes the OS pipeline to prevent micro-zombies
-            stream = os.popen(f"mediainfo {chunk_path}")
-            raw_info = stream.read()
-            stream.close()
+            import asyncio
+            process = await asyncio.create_subprocess_exec(
+                "mediainfo", chunk_path,
+                stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+            )
+            stdout, _ = await process.communicate()
+            raw_info = stdout.decode('utf-8').strip()
             
             raw_info = re.sub(r"Complete name\s+:\s+.*", f"Complete name                            : {task['name']}", raw_info)
             raw_info = re.sub(r"File size\s+:\s+.*", f"File size                                : {size_str}", raw_info)
@@ -119,10 +122,13 @@ async def panel_handler(client, cb):
                     if dl_size >= 5 * 1024 * 1024:
                         break
                         
-            # FIX: Closes the OS pipeline to prevent micro-zombies
-            stream = os.popen(f"ffprobe -v error -show_entries stream=index,codec_type,codec_name:stream_tags=language -of json {chunk_path}")
-            streams = stream.read()
-            stream.close()
+            import asyncio
+            process = await asyncio.create_subprocess_exec(
+                "ffprobe", "-v", "error", "-show_entries", "stream=index,codec_type,codec_name:stream_tags=language", "-of", "json", chunk_path,
+                stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+            )
+            stdout, _ = await process.communicate()
+            streams = stdout.decode('utf-8').strip()
             
             data = json.loads(streams).get("streams", [])
             txt = "**Available Streams:**\n"
@@ -154,7 +160,9 @@ async def bsetting_cb(client, cb):
         if key in config_data:
             del config_data[key]
             Config.save_config(config_data)
-        await cb.message.edit(f"✅ **{key}** has been successfully removed.\n\n✨ **𝘛𝘺𝘱𝘦 /𝘳𝘦𝘴𝘵𝘢𝘳𝘵 𝘵𝘰 𝘢𝘱𝘱𝘭𝘺.** ✨")
+        
+        btn = InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back to Menu", callback_data="bsetting_back"), InlineKeyboardButton("❌ Close", callback_data="bsetting_close")]])
+        await cb.message.edit(f"✅ **{key}** has been successfully removed.\n\n✨ **𝘛𝘺𝘱𝘦 /𝘳𝘦𝘴𝘵𝘢𝘳𝘵 𝘵𝘰 𝘢𝘱𝘱𝘭𝘺.** ✨", reply_markup=btn)
         del AppState.bsetting_state[user_id]
         return
 
@@ -177,13 +185,17 @@ async def bsetting_cb(client, cb):
         key = action.replace("select_", "")
         AppState.bsetting_state[user_id] = {"key": key, "step": "awaiting_value"}
         
-        sensitive_keys = ["USER_SESSION_STRING", "API_ID", "API_HASH", "TG_BOT_TOKEN", "OWNER_ID"]
+        # Hide value logic
+        hide_keys = ["API_ID", "API_HASH", "TG_BOT_TOKEN", "OWNER_ID", "USER_SESSION_STRING"]
+        # Lock remove button logic (We allow USER_SESSION_STRING to be removed!)
+        lock_keys = ["API_ID", "API_HASH", "TG_BOT_TOKEN", "OWNER_ID"]
         
-        if key in sensitive_keys: current_val = "******** (Hidden for Security)"
+        if key in hide_keys: current_val = "******** (Hidden for Security)"
         else: current_val = config_data.get(key, "Not Set")
 
         btn_list = [[InlineKeyboardButton("🔙 Back", callback_data="bsetting_back"), InlineKeyboardButton("❌ Close", callback_data="bsetting_close")]]
-        if key != "AS_DOCUMENT" and key in config_data:
+        
+        if key != "AS_DOCUMENT" and key not in lock_keys and key in config_data:
             btn_list.insert(0, [InlineKeyboardButton("🗑 Remove Value", callback_data="bsetting_remove")])
         btn = InlineKeyboardMarkup(btn_list)
         
@@ -198,7 +210,7 @@ async def bsetting_cb(client, cb):
 
         key = AppState.bsetting_state[user_id]["key"]
         raw_val = AppState.bsetting_state[user_id]["pending_value"]
-        sensitive_keys = ["USER_SESSION_STRING", "API_ID", "API_HASH", "TG_BOT_TOKEN", "OWNER_ID"]
+        hide_keys = ["API_ID", "API_HASH", "TG_BOT_TOKEN", "OWNER_ID", "USER_SESSION_STRING"]
 
         try:
             v = raw_val
@@ -209,8 +221,11 @@ async def bsetting_cb(client, cb):
             config_data[key] = v
             Config.save_config(config_data)
             
-            if key in sensitive_keys: await cb.message.edit(f"✅ **{key}** successfully securely stored.\n\n✨ **𝘛𝘺𝘱𝘦 /𝘳𝘦𝘴𝘵𝘢𝘳𝘵 𝘵𝘰 𝘢𝘱𝘱𝘭𝘺 𝘤𝘰𝘳𝘦 𝘤𝘩𝘢𝘯𝘨𝘦𝘴.** ✨")
-            else: await cb.message.edit(f"✅ **{key}** successfully updated to `{v}`.\n\n✨ **𝘛𝘺𝘱𝘦 /𝘳𝘦𝘴𝘵𝘢𝘳𝘵 𝘵𝘰 𝘢𝘱𝘱𝘭𝘺.** ✨")
+            btn = InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back to Menu", callback_data="bsetting_back"), InlineKeyboardButton("❌ Close", callback_data="bsetting_close")]])
+            if key in hide_keys: 
+                await cb.message.edit(f"✅ **{key}** successfully securely stored.\n\n✨ **𝘛𝘺𝘱𝘦 /𝘳𝘦𝘴𝘵𝘢𝘳𝘵 𝘵𝘰 𝘢𝘱𝘱𝘭𝘺 𝘤𝘰𝘳𝘦 𝘤𝘩𝘢𝘯𝘨𝘦𝘴.** ✨", reply_markup=btn)
+            else: 
+                await cb.message.edit(f"✅ **{key}** successfully updated to `{v}`.\n\n✨ **𝘛𝘺𝘱𝘦 /𝘳𝘦𝘴𝘵𝘢𝘳𝘵 𝘵𝘰 𝘢𝘱𝘱𝘭𝘺.** ✨", reply_markup=btn)
         except Exception as e: 
             await cb.message.edit(f"❌ **Error formatting variable:**\n{e}")
 
@@ -277,7 +292,6 @@ async def confirm_cancel_cb(client, cb):
             if AppState.current_process:
                 try: 
                     AppState.current_process.terminate()
-                    # FIX: THE ZOMBIE REAPER!
                     await AppState.current_process.wait()
                 except: pass
                 AppState.current_process = None

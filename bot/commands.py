@@ -154,11 +154,12 @@ async def mediainfo_cmd(client, message):
         if not real_path or not os.path.exists(real_path):
             return await msg.edit("❌ Failed to download file for probing.")
             
-        # FIX: Closes the OS pipeline to prevent micro-zombies
-        stream = os.popen(f"mediainfo '{real_path}'")
-        raw_info = stream.read()
-        stream.close()
-        
+        process = await asyncio.create_subprocess_exec(
+            "mediainfo", real_path,
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+        )
+        stdout, _ = await process.communicate()
+        raw_info = stdout.decode('utf-8').strip()
         os.remove(real_path)
         
         size_str, _ = get_file_info(message.reply_to_message)
@@ -198,12 +199,13 @@ async def generate_sample_background(client, target_message, status_msg):
         if not file_path or not os.path.exists(file_path): return await status_msg.edit(Localisation.FILE_NOT_FOUND)
 
         await status_msg.edit(Localisation.SAMPLE_GENERATING)
-        duration_cmd = f"ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 '{file_path}'"
         
-        # FIX: Closes the OS pipeline to prevent micro-zombies
-        stream = os.popen(duration_cmd)
-        duration_output = stream.read().strip()
-        stream.close()
+        process = await asyncio.create_subprocess_exec(
+            "ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", file_path,
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+        )
+        stdout, _ = await process.communicate()
+        duration_output = stdout.decode('utf-8').strip()
         
         try: total_duration = float(duration_output)
         except: total_duration = 0
@@ -314,11 +316,12 @@ async def speedtest_cmd(client, message):
         ping = res['ping']
         
         text = (
-            f"🚀 **Oracle Server Speedtest**\n\n"
-            f"🔻 **Download:** `{d_speed}/s`\n"
-            f"🔺 **Upload:** `{u_speed}/s`\n"
-            f"📶 **Ping:** `{ping} ms`\n"
-            f"🌍 **Server:** `{res['server']['name']}, {res['server']['country']}`"
+            f"🚀 **sᴘᴇᴇᴅᴛᴇsᴛ ɪɴғᴏ**\n"
+            f"__\n\n"
+            f"🔻 **ᴅᴏᴡɴʟᴏᴀᴅ:** `{d_speed}/s`\n"
+            f"🔺 **ᴜᴘʟᴏᴀᴅ:** `{u_speed}/s`\n"
+            f"📶 **ᴘɪɴɢ:** `{ping} ms`\n"
+            f"🌍 **sᴇʀᴠᴇʀ:** `{res['server']['name']}, {res['server']['country']}`"
         )
         await msg.edit(text)
     except Exception as e:
@@ -420,7 +423,8 @@ async def bsetting_input_catcher(client, message):
         AppState.bsetting_state[user_id]["pending_value"] = val
         AppState.bsetting_state[user_id]["step"] = "confirming"
         
-        sensitive_keys = ["USER_SESSION_STRING", "API_ID", "API_HASH", "TG_BOT_TOKEN", "OWNER_ID"]
+        # FIX: Completely stripped USER_SESSION_STRING from the core sensitive_keys!
+        sensitive_keys = ["API_ID", "API_HASH", "TG_BOT_TOKEN", "OWNER_ID"]
         
         btn = InlineKeyboardMarkup([
             [InlineKeyboardButton("Yes ✅", callback_data="bsetting_confirm_yes"),
@@ -431,6 +435,8 @@ async def bsetting_input_catcher(client, message):
         
         if key in sensitive_keys:
             text = f"❓ **Confirm {key}**\n\nSensitive credential detected.\nDo you want to securely save this?"
+        elif key == "USER_SESSION_STRING":
+            text = f"❓ **Confirm Update**\n\nNew session string received.\nDo you want to securely save this?"
         elif key == "AS_DOCUMENT":
             text = f"❓ **Confirm Update**\n\nYou entered **{val}**.\n✨ 𝘖𝘯𝘭𝘺 𝘵𝘺𝘱𝘦 𝘛𝘳𝘶𝘦 𝘰𝘳 𝘍𝘢𝘭𝘴𝘦 ✨\n\nDo you want to save this?"
         else:
