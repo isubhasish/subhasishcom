@@ -4,6 +4,8 @@ import io
 import time
 import json
 import random
+import uuid
+import signal
 import asyncio
 import traceback
 import gc
@@ -14,7 +16,7 @@ from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from bot.__init__ import bot_app, user_app, config_data
 from bot.config import Config
 from bot.localisation import Localisation
-from bot.helper_funcs.utils import AppState, queue, START_TIME, get_readable_time, send_log, get_file_info
+from bot.helper_funcs.utils import AppState, queue, START_TIME, get_readable_time, send_log, get_file_info, kill_running_process
 from bot.helper_funcs.download import get_graph_link
 from bot.helper_funcs.display_progress import humanbytes
 
@@ -125,6 +127,8 @@ async def cancel_cmd(client, message):
         msg = await message.reply(Localisation.NO_ACTIVE_TASK)
         return asyncio.create_task(auto_clean(msg, message))
     btn = InlineKeyboardMarkup([[InlineKeyboardButton("Yes✅", callback_data="confirm_cancel_yes"), InlineKeyboardButton("No ❌", callback_data="confirm_cancel_no")]])
+    
+    # FIX: Ensure prompt perfectly replies to the original video media!
     msg = await message.reply(Localisation.CANCEL_PROMPT, reply_markup=btn, quote=True)
     asyncio.create_task(auto_clean(msg, message))
 
@@ -156,12 +160,14 @@ async def mediainfo_cmd(client, message):
             
         process = await asyncio.create_subprocess_exec(
             "mediainfo", real_path,
-            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+            start_new_session=True
         )
         try:
             stdout, _ = await asyncio.wait_for(process.communicate(), timeout=30)
         except asyncio.TimeoutError:
-            process.kill()
+            try: os.killpg(os.getpgid(process.pid), signal.SIGKILL)
+            except: pass
             raise Exception("MediaInfo Process Timed Out")
             
         raw_info = stdout.decode('utf-8').strip()
@@ -207,12 +213,14 @@ async def generate_sample_background(client, target_message, status_msg):
         
         process = await asyncio.create_subprocess_exec(
             "ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", file_path,
-            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+            start_new_session=True
         )
         try:
             stdout, _ = await asyncio.wait_for(process.communicate(), timeout=30)
         except asyncio.TimeoutError:
-            process.kill()
+            try: os.killpg(os.getpgid(process.pid), signal.SIGKILL)
+            except: pass
             raise Exception("FFProbe Process Timed Out")
             
         duration_output = stdout.decode('utf-8').strip()
@@ -225,10 +233,10 @@ async def generate_sample_background(client, target_message, status_msg):
             return await status_msg.edit("⚠️ Video is too short to generate a 30-second sample.")
 
         start_time = random.uniform(10, total_duration - 35)
-        sample_out = f"Sample_{int(time.time())}.mkv"
+        sample_out = f"Sample_{uuid.uuid4().hex}.mkv"
         cut_cmd = ["ffmpeg", "-ss", str(start_time), "-i", file_path, "-t", "30", "-c", "copy", "-y", sample_out]
         
-        process = await asyncio.create_subprocess_exec(*cut_cmd)
+        process = await asyncio.create_subprocess_exec(*cut_cmd, start_new_session=True)
         await process.communicate()
 
         if not os.path.exists(sample_out):
@@ -287,12 +295,7 @@ async def cancel_all_cmd(client, message):
     if not is_owner(message): return await message.reply(UNAUTH_MSG)
     while not queue.empty(): queue.get_nowait(); queue.task_done()
     AppState.cancel_task = True 
-    if AppState.current_process: 
-        try: 
-            AppState.current_process.terminate()
-            await AppState.current_process.wait()
-        except: pass
-        AppState.current_process = None
+    await kill_running_process()
     msg = await message.reply("⚠️ **ALL TASKS CANCELLED AND QUEUE CLEARED.**")
     asyncio.create_task(auto_clean(msg, message))
 
@@ -325,7 +328,6 @@ async def speedtest_cmd(client, message):
         u_speed = humanbytes(res['upload'] / 8)
         ping = res['ping']
         
-        # FIX: The exact HTML + Markdown styling provided by your friend to create a true underline!
         text = (
             f"🚀 <u>**sᴘᴇᴇᴅᴛᴇsᴛ ɪɴғᴏ**</u>\n\n"
             f"🔻 **ᴅᴏᴡɴʟᴏᴀᴅ:** `{d_speed}/s`\n"
@@ -338,7 +340,8 @@ async def speedtest_cmd(client, message):
         await msg.edit(f"❌ **Speedtest Failed:** {e}")
         
 def run_speedtest():
-    st = speedtest.Speedtest()
+    # FIX: Added secure=True to bypass 403 Forbidden errors on Oracle servers
+    st = speedtest.Speedtest(secure=True)
     st.get_best_server()
     st.download()
     st.upload()

@@ -1,6 +1,7 @@
 import time
+import asyncio
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-from bot.helper_funcs.utils import AppState, get_sys_stats, queue, get_network_io, get_readable_time, START_TIME
+from bot.helper_funcs.utils import AppState, get_sys_stats, queue, get_ist, get_readable_time, START_TIME
 
 def humanbytes(size):
     if not size: return "0 B"
@@ -10,9 +11,7 @@ def humanbytes(size):
     while size > power:
         size /= power
         n += 1
-    if n == 1: 
-        size /= 1024
-        n = 2
+    # FIX: Removed the buggy custom size math that distorted sizes!
     return f"{size:.2f} {Dic_powerN[n]}"
 
 def time_formatter(milliseconds: int) -> str:
@@ -28,9 +27,9 @@ def make_bar(percent):
     return "▣" * done + "□" * (15 - done)
 
 async def progress_bar(current, total, status_text, message, start_time, last_update_time):
+    # FIX: ONLY raise CancelledError. Do NOT clear the flag early to avoid racing FFmpeg.
     if AppState.cancel_task:
-        AppState.cancel_task = False
-        raise Exception("Task Cancelled by User")
+        raise asyncio.CancelledError("Task Cancelled by User")
 
     now = time.time()
     if round((now - last_update_time[0])) >= 5 or current == total:
@@ -44,7 +43,7 @@ async def progress_bar(current, total, status_text, message, start_time, last_up
         elif "Uploading" in status_text: header = "📤 Uploading ... 📤"
         else: header = "🔄 Processing ... 🔄"
 
-        # FIX: The Main UI is now strictly the Phonetic Layout. No more Status text overlap!
+        # FIX: The Main UI is perfectly Phonetic. No 🌐 Bᴏᴛ Sᴛᴀᴛɪsᴛɪᴄs 🌐 header!
         text = (
             f"ℹ️ **sᴛᴀᴛᴜs:** {header}\n\n"
             f"`{AppState.active_file_name}`\n"
@@ -62,4 +61,4 @@ async def progress_bar(current, total, status_text, message, start_time, last_up
         try:
             await message.edit(text, reply_markup=btn)
             last_update_time[0] = now
-        except Exception as e: pass
+        except Exception: pass

@@ -1,5 +1,7 @@
 import asyncio
 import time
+import os
+import signal
 from datetime import datetime, timezone, timedelta
 from pyrogram.file_id import FileId 
 from bot.__init__ import bot_app, logger, config_data
@@ -7,16 +9,40 @@ from bot.__init__ import bot_app, logger, config_data
 queue = asyncio.Queue()
 START_TIME = time.time()
 
+# FIX: Added architecture-level cancellation locks and universal process tracking
 class AppState:
     current_process = None
+    process_lock = asyncio.Lock()
+    cancel_task = False
+    cancelling = False
     active_file_name = "None"
     pending_tasks = {}
     awaiting_index = {}
     bot_username = "Bot" 
     bsetting_state = {}  
     is_premium = False 
-    cancel_task = False        # FIX: The Global Network Kill-Switch
-    last_progress_text = ""    # FIX: The Status UI Snapshot Tracker
+    last_progress_text = ""
+
+# FIX: The Universal Zombie Killer. Exterminates process groups cleanly.
+async def kill_running_process():
+    async with AppState.process_lock:
+        proc = AppState.current_process
+        if not proc: return
+        if AppState.cancelling: return
+        
+        AppState.cancelling = True
+        try:
+            try:
+                os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
+                await asyncio.wait_for(proc.wait(), timeout=4)
+            except asyncio.TimeoutError:
+                os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+                await asyncio.wait_for(proc.wait(), timeout=3)
+            except Exception: pass
+        except Exception: pass
+        finally:
+            AppState.current_process = None
+            AppState.cancelling = False
 
 def get_readable_time(milliseconds: int) -> str:
     seconds, milliseconds = divmod(int(milliseconds), 1000)
@@ -66,7 +92,7 @@ def get_file_info(message):
     else:
         for unit in ['B','KB','MB','GB','TB']:
             if size_bytes < 1024:
-                size_str = f"{size_bytes:.2f}{unit}"
+                size_str = f"{size_bytes:.2f} {unit}"
                 break
             size_bytes /= 1024
             

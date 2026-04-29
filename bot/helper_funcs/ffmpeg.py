@@ -7,14 +7,14 @@ from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from bot.__init__ import bot_app, user_app, logger, config_data
 from bot.config import Config
 from bot.localisation import Localisation
-from bot.helper_funcs.utils import queue, AppState, get_ist, send_log, get_sys_stats, get_file_info, get_network_io, get_readable_time, START_TIME
+from bot.helper_funcs.utils import queue, AppState, get_ist, send_log, get_sys_stats, get_file_info, kill_running_process, get_readable_time, START_TIME
 from bot.helper_funcs.display_progress import progress_bar, humanbytes, time_formatter, make_bar
 
 async def take_screen_shot(video_file, output_directory, ttl):
     out_put_file_name = os.path.join(output_directory, f"{time.time()}_thumb.jpg")
     file_genertor_command = ["ffmpeg", "-ss", str(ttl), "-i", video_file, "-vframes", "1", out_put_file_name]
     try:
-        process = await asyncio.create_subprocess_exec(*file_genertor_command, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+        process = await asyncio.create_subprocess_exec(*file_genertor_command, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE, start_new_session=True)
         await process.communicate()
         if os.path.lexists(out_put_file_name): return out_put_file_name
     except Exception as e: logger.error(f"Failed to generate auto-thumbnail: {e}")
@@ -36,32 +36,29 @@ async def worker():
             now_time = get_ist()
             await send_log(f"**Bot Become Busy Now !!** \n\nDownload Started at {now_time}")
             
+            # FIX: Bulletproof Download Phase
+            download_cancelled = False
             try:
                 file_path = await user_app.download_media(msg, progress=progress_bar, progress_args=("Downloading", status_msg, start_time, last_up))
-                if not file_path or not os.path.exists(file_path):
-                    await status_msg.edit(Localisation.FILE_NOT_FOUND)
-                    await send_log(f"**Download Error, Bot is Free Now !!** \n\nProcess Done at {get_ist()}\nReason: Path not exist")
-                    continue
+            except asyncio.CancelledError: download_cancelled = True
             except Exception as e:
-                # FIX: Strict Download Cancellation Breaker. Stops the bot from jumping to FFmpeg!
-                if AppState.cancel_task or "Cancelled" in str(e) or "400" in str(e):
-                    AppState.cancel_task = False
-                    await status_msg.edit("⚠️ Task Cancelled by User.")
-                    await msg.reply("❌ **Task Cancelled.**", quote=True)
-                    if file_path and os.path.exists(file_path): os.remove(file_path)
-                    continue 
-                else:
-                    await status_msg.edit(Localisation.DOWNLOAD_FAILED)
-                    await send_log(f"**Download Failed, Bot is Free Now !!** \n\nProcess Done at {get_ist()}\nError: {e}")
-                    if file_path and os.path.exists(file_path): os.remove(file_path)
-                    continue
-            
-            # Double-check cancel state before proceeding to FFmpeg
-            if AppState.cancel_task:
+                if "Cancelled" in str(e) or "400" in str(e): download_cancelled = True
+                else: raise e
+                
+            if download_cancelled or AppState.cancel_task:
                 AppState.cancel_task = False
-                await status_msg.edit("⚠️ Task Cancelled by User.")
-                await msg.reply("❌ **Task Cancelled.**", quote=True)
-                if file_path and os.path.exists(file_path): os.remove(file_path)
+                if file_path and os.path.exists(file_path): 
+                    try: os.remove(file_path)
+                    except: pass
+                await status_msg.edit("❌ **Task Cancelled.**")
+                await bot_app.send_message(status_msg.chat.id, "🛑 **Task Cancelled.**", reply_to_message_id=msg.id)
+                AppState.active_file_name = "None"
+                AppState.last_progress_text = ""
+                continue
+                
+            if not file_path or not os.path.exists(file_path):
+                await status_msg.edit(Localisation.FILE_NOT_FOUND)
+                await send_log(f"**Download Error, Bot is Free Now !!** \n\nProcess Done at {get_ist()}\nReason: Path not exist")
                 continue
 
             dl_time = int(time.time() - start_time)
@@ -99,85 +96,78 @@ async def worker():
             encode_start_time = time.time()
             
             try:
-                process = await asyncio.create_subprocess_exec(*cmd, stderr=asyncio.subprocess.PIPE)
-                AppState.current_process = process
+                # FIX: start_new_session=True isolates FFmpeg into its own room so kill_running_process wipes it perfectly!
+                process = await asyncio.create_subprocess_exec(*cmd, stderr=asyncio.subprocess.PIPE, start_new_session=True)
+                async with AppState.process_lock:
+                    AppState.current_process = process
                 last_update_time = time.time()
                 btn = InlineKeyboardMarkup([[InlineKeyboardButton("🛑 Cancel Task", callback_data="cancel_running")]])
 
-                line_buf = bytearray()
                 while True:
                     if AppState.cancel_task:
-                        AppState.cancel_task = False
-                        if AppState.current_process:
-                            try:
-                                AppState.current_process.terminate()
-                                await AppState.current_process.wait()
-                            except: pass
-                        raise Exception("Task Cancelled by User")
+                        await kill_running_process()
+                        raise asyncio.CancelledError("Task Cancelled by User")
 
-                    chunk = await process.stderr.read(10)
-                    if not chunk: break
-                    for b in chunk:
-                        if b in (13, 10): 
-                            line_str = line_buf.decode('utf-8', errors='ignore').strip()
-                            line_buf.clear()
+                    # FIX: readline is vastly safer for FFmpeg stdout parsing than raw chunks
+                    line_bytes = await process.stderr.readline()
+                    if not line_bytes: break
+                    line_str = line_bytes.decode('utf-8', errors='ignore').strip()
+                    if not line_str: continue
+
+                    if not duration_sec and "Duration:" in line_str:
+                        match = re.search(r"Duration:\s*(\d{2}):(\d{2}):(\d{2})", line_str)
+                        if match: duration_sec = int(match.group(1))*3600 + int(match.group(2))*60 + int(match.group(3))
+
+                    if "time=" in line_str:
+                        time_match = re.search(r"time=(\d{2}):(\d{2}):(\d{2})\.", line_str)
+                        if not time_match: time_match = re.search(r"time=(\d{2}):(\d{2}):(\d{2})", line_str)
                             
-                            if not line_str: continue
+                        if time_match and (time.time() - last_update_time > 8):
+                            curr_sec = int(time_match.group(1))*3600 + int(time_match.group(2))*60 + int(time_match.group(3))
+                            if duration_sec > 0:
+                                percent = (curr_sec / duration_sec) * 100
+                                elapsed = time.time() - encode_start_time
+                                speed = curr_sec / elapsed if elapsed > 0 else 0
+                                eta = (duration_sec - curr_sec) / speed if speed > 0 else 0
+                                
+                                cpu, mem, disk = get_sys_stats()
+                                
+                                est_total_bytes = os.path.getsize(file_path) * 0.4 
+                                current_bytes = (percent/100) * est_total_bytes
 
-                            if not duration_sec and "Duration:" in line_str:
-                                match = re.search(r"Duration:\s*(\d{2}):(\d{2}):(\d{2})", line_str)
-                                if match: duration_sec = int(match.group(1))*3600 + int(match.group(2))*60 + int(match.group(3))
-
-                            if "time=" in line_str:
-                                time_match = re.search(r"time=(\d{2}):(\d{2}):(\d{2})\.", line_str)
-                                if not time_match: time_match = re.search(r"time=(\d{2}):(\d{2}):(\d{2})", line_str)
-                                    
-                                if time_match and (time.time() - last_update_time > 8):
-                                    curr_sec = int(time_match.group(1))*3600 + int(time_match.group(2))*60 + int(time_match.group(3))
-                                    if duration_sec > 0:
-                                        percent = (curr_sec / duration_sec) * 100
-                                        elapsed = time.time() - encode_start_time
-                                        speed = curr_sec / elapsed if elapsed > 0 else 0
-                                        eta = (duration_sec - curr_sec) / speed if speed > 0 else 0
-                                        
-                                        cpu, mem, disk = get_sys_stats()
-                                        
-                                        est_total_bytes = os.path.getsize(file_path) * 0.4 
-                                        current_bytes = (percent/100) * est_total_bytes
-
-                                        # FIX: Flawlessly restored your exclusive Phonetic Active UI!
-                                        text = (
-                                            f"ℹ️ **ɴᴏᴡ:** 💡 ENCODING... 💡\n\n"
-                                            f"⏱️ **ᴇᴛᴀ:** {time_formatter(eta*1000)}\n\n"
-                                            f"`{AppState.active_file_name}`\n"
-                                            f"[{make_bar(percent)}] {percent:.2f}%\n\n"
-                                            f"⚡️ **ꜱᴘᴇᴇᴅ:** {humanbytes((current_bytes/elapsed) if elapsed else 0)}/s\n"
-                                            f"⏰ **ᴇʟᴀᴘsᴇᴅ:** {time_formatter(elapsed*1000)}\n"
-                                            f"📦 **sɪᴢᴇ:** {humanbytes(current_bytes)} / {humanbytes(est_total_bytes)}\n\n"
-                                            f"🖥 CPU: {cpu}% | 💽 RAM: {mem}%"
-                                        )
-                                        
-                                        AppState.last_progress_text = text 
-                                        
-                                        try:
-                                            await status_msg.edit(text, reply_markup=btn)
-                                            last_update_time = time.time()
-                                        except: pass
-                        else:
-                            line_buf.append(b)
+                                text = (
+                                    f"ℹ️ **ɴᴏᴡ:** 💡 ENCODING... 💡\n\n"
+                                    f"⏱️ **ᴇᴛᴀ:** {time_formatter(eta*1000)}\n\n"
+                                    f"`{AppState.active_file_name}`\n"
+                                    f"[{make_bar(percent)}] {percent:.2f}%\n\n"
+                                    f"⚡️ **ꜱᴘᴇᴇᴅ:** {humanbytes((current_bytes/elapsed) if elapsed else 0)}/s\n"
+                                    f"⏰ **ᴇʟᴀᴘsᴇᴅ:** {time_formatter(elapsed*1000)}\n"
+                                    f"📦 **sɪᴢᴇ:** {humanbytes(current_bytes)} / {humanbytes(est_total_bytes)}\n\n"
+                                    f"🖥 CPU: {cpu}% | 💽 RAM: {mem}%"
+                                )
+                                
+                                AppState.last_progress_text = text 
+                                
+                                try:
+                                    await status_msg.edit(text, reply_markup=btn)
+                                    last_update_time = time.time()
+                                except: pass
 
                 await process.wait()
-                if AppState.current_process == process: AppState.current_process = None
-                if process.returncode != 0: raise Exception("Task Cancelled by User")
+                async with AppState.process_lock:
+                    if AppState.current_process == process: AppState.current_process = None
+                if process.returncode != 0: raise asyncio.CancelledError("FFmpeg failed or cancelled")
                     
             except Exception as e:
-                # FIX: Strict Compression Cancellation Breaker
-                if AppState.cancel_task or "Cancelled" in str(e):
+                # FIX: Strict Encode Cancellation Breaker
+                if AppState.cancel_task or isinstance(e, asyncio.CancelledError):
                     AppState.cancel_task = False
-                    await status_msg.edit("⚠️ Task Cancelled by User.")
-                    await msg.reply("❌ **Task Cancelled.**", quote=True)
+                    await status_msg.edit("❌ **Task Cancelled.**")
+                    await bot_app.send_message(status_msg.chat.id, "🛑 **Task Cancelled.**", reply_to_message_id=msg.id)
                     if file_path and os.path.exists(file_path): os.remove(file_path)
                     if out and os.path.exists(out): os.remove(out)
+                    AppState.active_file_name = "None"
+                    AppState.last_progress_text = ""
                     continue
                 else:
                     await status_msg.edit(Localisation.COMPRESS_FAILED)
@@ -204,7 +194,7 @@ async def worker():
                     split_time = f"{st_h:02d}:{st_m:02d}:{st_s:02d}"
 
                 split_cmd = ["ffmpeg", "-i", out, "-c", "copy", "-f", "segment", "-segment_time", split_time, "-reset_timestamps", "1", f"{base_name}_part%03d{ext}"]
-                s_proc = await asyncio.create_subprocess_exec(*split_cmd)
+                s_proc = await asyncio.create_subprocess_exec(*split_cmd, start_new_session=True)
                 await s_proc.communicate()
                 files_to_upload = sorted([f for f in os.listdir(".") if f.startswith(base_name + "_part") and f.endswith(ext)])
                 os.remove(out) 
@@ -215,8 +205,10 @@ async def worker():
             if not actual_thumb and files_to_upload: actual_thumb = await take_screen_shot(files_to_upload[0], Config.THUMB_DIR, 5)
 
             as_doc = config_data.get("AS_DOCUMENT", True)
+            upload_aborted = False
 
             for idx, upload_file in enumerate(files_to_upload):
+                if upload_aborted: break
                 part_size_bytes = os.path.getsize(upload_file)
                 part_size_str = humanbytes(part_size_bytes)
                     
@@ -248,19 +240,23 @@ async def worker():
                         await uploaded_msg.edit_caption(updated_caption)
 
                 except Exception as e:
-                    # FIX: Strict Upload Cancellation Breaker
-                    if AppState.cancel_task or "Cancelled" in str(e) or "400" in str(e):
+                    # FIX: Strict Upload Cancellation Breaker. Triggers a full abort.
+                    if AppState.cancel_task or isinstance(e, asyncio.CancelledError) or "Cancelled" in str(e) or "400" in str(e):
                         AppState.cancel_task = False
-                        await status_msg.edit("⚠️ Task Cancelled by User.")
-                        await msg.reply("❌ **Task Cancelled.**", quote=True)
-                        if os.path.exists(upload_file): os.remove(upload_file)
-                        continue
+                        upload_aborted = True
+                        await status_msg.edit("❌ **Task Cancelled.**")
+                        await bot_app.send_message(status_msg.chat.id, "🛑 **Task Cancelled.**", reply_to_message_id=msg.id)
                     else:
                         await status_msg.edit(Localisation.UPLOAD_FAILED)
                         await send_log(f"**Upload Stopped, Bot is Free Now !!** \n\nProcess Done at {get_ist()}\nError: {e}")
                 finally:
                     if os.path.exists(upload_file): os.remove(upload_file)
 
+            if upload_aborted:
+                AppState.active_file_name = "None"
+                AppState.last_progress_text = ""
+                continue
+                
             await status_msg.edit("✅ Process Complete!")
             await asyncio.sleep(3) 
             try: await status_msg.delete() 
@@ -270,6 +266,7 @@ async def worker():
             
         except Exception as e: logger.error(f"Fatal Worker Error: {e}")
         finally: 
+            await kill_running_process() # Universal cleanup
             if file_path and os.path.exists(file_path): os.remove(file_path)
             if actual_thumb and actual_thumb != custom_thumb and os.path.exists(actual_thumb): os.remove(actual_thumb)
             AppState.active_file_name = "None"

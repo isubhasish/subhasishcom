@@ -1,12 +1,14 @@
 import os
 import json
 import re 
+import uuid
+import signal
 import asyncio
 from pyrogram import filters
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ForceReply
 from bot.__init__ import bot_app, user_app, config_data
 from bot.config import Config
-from bot.helper_funcs.utils import AppState, queue, get_file_info
+from bot.helper_funcs.utils import AppState, queue, get_file_info, kill_running_process
 from bot.helper_funcs.download import get_graph_link
 from bot.localisation import Localisation
 
@@ -53,7 +55,8 @@ async def panel_handler(client, cb):
 
     if action == "info":
         await cb.message.edit("📝 Probing MediaInfo...")
-        chunk_path = f"probe_{tid}.mkv"
+        # FIX: Unique UUID prevents file locking collisions!
+        chunk_path = f"probe_{uuid.uuid4().hex}.mkv"
         
         try:
             with open(chunk_path, "wb") as f:
@@ -66,15 +69,17 @@ async def panel_handler(client, cb):
                         
             size_str, _ = get_file_info(task['msg'])
             
-            # FIX: Added process termination shield to prevent infinite freeze loop
+            # FIX: MediaInfo timeout shield to prevent infinite freeze loop
             process = await asyncio.create_subprocess_exec(
                 "mediainfo", chunk_path,
-                stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+                stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+                start_new_session=True
             )
             try:
                 stdout, _ = await asyncio.wait_for(process.communicate(), timeout=30)
             except asyncio.TimeoutError:
-                process.kill()
+                try: os.killpg(os.getpgid(process.pid), signal.SIGKILL)
+                except: pass
                 raise Exception("MediaInfo Process Timed Out")
                 
             raw_info = stdout.decode('utf-8').strip()
@@ -117,7 +122,7 @@ async def panel_handler(client, cb):
 
     elif action == "select":
         await cb.message.edit("⏳ Fetching Stream List...")
-        chunk_path = f"probe_{tid}.mkv"
+        chunk_path = f"probe_{uuid.uuid4().hex}.mkv"
         
         try:
             with open(chunk_path, "wb") as f:
@@ -128,15 +133,16 @@ async def panel_handler(client, cb):
                     if dl_size >= 5 * 1024 * 1024:
                         break
                         
-            # FIX: Added process termination shield to prevent infinite freeze loop
             process = await asyncio.create_subprocess_exec(
                 "ffprobe", "-v", "error", "-show_entries", "stream=index,codec_type,codec_name:stream_tags=language", "-of", "json", chunk_path,
-                stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+                stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+                start_new_session=True
             )
             try:
                 stdout, _ = await asyncio.wait_for(process.communicate(), timeout=30)
             except asyncio.TimeoutError:
-                process.kill()
+                try: os.killpg(os.getpgid(process.pid), signal.SIGKILL)
+                except: pass
                 raise Exception("FFProbe Process Timed Out")
                 
             streams = stdout.decode('utf-8').strip()
@@ -236,7 +242,6 @@ async def bsetting_cb(client, cb):
             else: 
                 await cb.message.edit(f"✅ **{key}** successfully updated to `{v}`.\n\n✨ **𝘛𝘺𝘱𝘦 /𝘳𝘦𝘴𝘵𝘢𝘳𝘵 𝘵𝘰 𝘢𝘱𝘱𝘭𝘺.** ✨", reply_markup=btn)
                 
-            # FIX: Wipe the user's text message to remove Ghost Text from chat!
             if "msg_to_delete" in AppState.bsetting_state[user_id]:
                 try: await client.delete_messages(chat_id=cb.message.chat.id, message_ids=AppState.bsetting_state[user_id]["msg_to_delete"])
                 except: pass
@@ -248,7 +253,6 @@ async def bsetting_cb(client, cb):
 
     elif action == "confirm_no":
         if user_id in AppState.bsetting_state: 
-            # FIX: Wipe the user's text message to remove Ghost Text from chat!
             if "msg_to_delete" in AppState.bsetting_state[user_id]:
                 try: await client.delete_messages(chat_id=cb.message.chat.id, message_ids=AppState.bsetting_state[user_id]["msg_to_delete"])
                 except: pass
@@ -259,7 +263,6 @@ async def bsetting_cb(client, cb):
 
     elif action == "back" or action == "close":
         if user_id in AppState.bsetting_state: 
-            # FIX: Wipe the user's text message to remove Ghost Text from chat!
             if "msg_to_delete" in AppState.bsetting_state[user_id]:
                 try: await client.delete_messages(chat_id=cb.message.chat.id, message_ids=AppState.bsetting_state[user_id]["msg_to_delete"])
                 except: pass
@@ -305,7 +308,14 @@ async def cancel_running_cb(client, cb):
     btn = InlineKeyboardMarkup([
         [InlineKeyboardButton("Yes✅", callback_data="confirm_cancel_yes"), InlineKeyboardButton("No ❌", callback_data="confirm_cancel_no")]
     ])
-    await bot_app.send_message(cb.message.chat.id, Localisation.CANCEL_PROMPT, reply_markup=btn)
+    
+    # FIX: Ensure prompt perfectly replies to the original video media!
+    await bot_app.send_message(
+        cb.message.chat.id, 
+        Localisation.CANCEL_PROMPT, 
+        reply_to_message_id=cb.message.reply_to_message.id if cb.message.reply_to_message else cb.message.id,
+        reply_markup=btn
+    )
 
 @bot_app.on_callback_query(filters.regex(r"^confirm_cancel_(.*)"))
 async def confirm_cancel_cb(client, cb):
@@ -314,15 +324,17 @@ async def confirm_cancel_cb(client, cb):
 
     action = cb.matches[0].group(1)
     if action == "yes":
+        # FIX: Prevents Double-Cancel Button Mashing Races!
+        if AppState.cancelling:
+            return await cb.answer("⚠️ Cancellation already in progress...", show_alert=True)
+            
         if AppState.active_file_name != "None":
             AppState.cancel_task = True
-            if AppState.current_process:
-                try: 
-                    AppState.current_process.terminate()
-                    await AppState.current_process.wait()
-                except: pass
-                AppState.current_process = None
-            await cb.message.edit(Localisation.CANCELLED_MSG)
+            await kill_running_process() # Universal UI wipe
+            
+            try: await cb.message.delete()
+            except: pass
         else: await cb.message.edit(Localisation.NO_ACTIVE_TASK)
     else:
-        await cb.message.edit("▶️ Cancellation aborted. Continuing task.")
+        try: await cb.message.delete()
+        except: pass
