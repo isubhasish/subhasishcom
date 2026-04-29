@@ -121,7 +121,6 @@ async def clear_cmd(client, message):
 @bot_app.on_message(filters.command("cancel"))
 async def cancel_cmd(client, message):
     if not is_sudo(message): return await message.reply(UNAUTH_MSG)
-    # FIX: Removed the AppState.current_process check so it works on downloads too!
     if AppState.active_file_name == "None": 
         msg = await message.reply(Localisation.NO_ACTIVE_TASK)
         return asyncio.create_task(auto_clean(msg, message))
@@ -155,7 +154,11 @@ async def mediainfo_cmd(client, message):
         if not real_path or not os.path.exists(real_path):
             return await msg.edit("❌ Failed to download file for probing.")
             
-        raw_info = os.popen(f"mediainfo '{real_path}'").read()
+        # FIX: Closes the OS pipeline to prevent micro-zombies
+        stream = os.popen(f"mediainfo '{real_path}'")
+        raw_info = stream.read()
+        stream.close()
+        
         os.remove(real_path)
         
         size_str, _ = get_file_info(message.reply_to_message)
@@ -196,7 +199,12 @@ async def generate_sample_background(client, target_message, status_msg):
 
         await status_msg.edit(Localisation.SAMPLE_GENERATING)
         duration_cmd = f"ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 '{file_path}'"
-        duration_output = os.popen(duration_cmd).read().strip()
+        
+        # FIX: Closes the OS pipeline to prevent micro-zombies
+        stream = os.popen(duration_cmd)
+        duration_output = stream.read().strip()
+        stream.close()
+        
         try: total_duration = float(duration_output)
         except: total_duration = 0
             
@@ -266,10 +274,11 @@ async def restart_cmd(client, message):
 async def cancel_all_cmd(client, message):
     if not is_owner(message): return await message.reply(UNAUTH_MSG)
     while not queue.empty(): queue.get_nowait(); queue.task_done()
-    # FIX: Added kill-switch for downloads/uploads
     AppState.cancel_task = True 
     if AppState.current_process: 
-        try: AppState.current_process.terminate()
+        try: 
+            AppState.current_process.terminate()
+            await AppState.current_process.wait()
         except: pass
         AppState.current_process = None
     msg = await message.reply("⚠️ **ALL TASKS CANCELLED AND QUEUE CLEARED.**")

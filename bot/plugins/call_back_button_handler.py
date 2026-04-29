@@ -64,7 +64,11 @@ async def panel_handler(client, cb):
                         break
                         
             size_str, _ = get_file_info(task['msg'])
-            raw_info = os.popen(f"mediainfo {chunk_path}").read()
+            
+            # FIX: Closes the OS pipeline to prevent micro-zombies
+            stream = os.popen(f"mediainfo {chunk_path}")
+            raw_info = stream.read()
+            stream.close()
             
             raw_info = re.sub(r"Complete name\s+:\s+.*", f"Complete name                            : {task['name']}", raw_info)
             raw_info = re.sub(r"File size\s+:\s+.*", f"File size                                : {size_str}", raw_info)
@@ -115,7 +119,11 @@ async def panel_handler(client, cb):
                     if dl_size >= 5 * 1024 * 1024:
                         break
                         
-            streams = os.popen(f"ffprobe -v error -show_entries stream=index,codec_type,codec_name:stream_tags=language -of json {chunk_path}").read()
+            # FIX: Closes the OS pipeline to prevent micro-zombies
+            stream = os.popen(f"ffprobe -v error -show_entries stream=index,codec_type,codec_name:stream_tags=language -of json {chunk_path}")
+            streams = stream.read()
+            stream.close()
+            
             data = json.loads(streams).get("streams", [])
             txt = "**Available Streams:**\n"
             for s in data:
@@ -267,7 +275,10 @@ async def confirm_cancel_cb(client, cb):
         if AppState.active_file_name != "None":
             AppState.cancel_task = True
             if AppState.current_process:
-                try: AppState.current_process.terminate()
+                try: 
+                    AppState.current_process.terminate()
+                    # FIX: THE ZOMBIE REAPER!
+                    await AppState.current_process.wait()
                 except: pass
                 AppState.current_process = None
             await cb.message.edit(Localisation.CANCELLED_MSG)

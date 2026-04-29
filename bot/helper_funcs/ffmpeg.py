@@ -7,7 +7,6 @@ from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from bot.__init__ import bot_app, user_app, logger, config_data
 from bot.config import Config
 from bot.localisation import Localisation
-# FIX: Imported the correct START_TIME global variable
 from bot.helper_funcs.utils import queue, AppState, get_ist, send_log, get_sys_stats, get_file_info, get_network_io, get_readable_time, START_TIME
 from bot.helper_funcs.display_progress import progress_bar, humanbytes, time_formatter, make_bar
 
@@ -93,7 +92,11 @@ async def worker():
                     if AppState.cancel_task:
                         AppState.cancel_task = False
                         if AppState.current_process:
-                            AppState.current_process.terminate()
+                            try:
+                                AppState.current_process.terminate()
+                                # FIX: THE ZOMBIE REAPER! Forces Python to collect the death certificate.
+                                await AppState.current_process.wait()
+                            except: pass
                         raise Exception("Task Cancelled by User")
 
                     chunk = await process.stderr.read(10)
@@ -125,7 +128,6 @@ async def worker():
                                         sent, recv = get_network_io()
                                         import psutil
                                         free_disk_gb = round(psutil.disk_usage('/').free / (1024**3), 2)
-                                        # FIX: Uses perfect system START_TIME for uptime
                                         uptime_str = get_readable_time((time.time() - START_TIME)*1000)
                                         
                                         est_total_bytes = os.path.getsize(file_path) * 0.4 
