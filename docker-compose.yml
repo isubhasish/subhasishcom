@@ -11,5 +11,5 @@ services:
       - ./downloads:/app/downloads
       - ./config.json:/app/config.json
     environment:
-      - PYTHONUNBUFFERED=1
-      - TZ=Asia/Kolkata
+      PYTHONUNBUFFERED: '1'
+      TZ: 'Asia/Kolkata'
