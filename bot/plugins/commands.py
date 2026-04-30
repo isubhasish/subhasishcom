@@ -13,7 +13,6 @@ import speedtest
 import re 
 from pyrogram import filters
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-# FIX: Native bot import
 from bot import bot_app, user_app, config_data
 from bot.config import Config
 from bot.localisation import Localisation
@@ -24,10 +23,10 @@ from bot.helper_funcs.display_progress import humanbytes
 SUDO_USERS = config_data["AUTH_USERS"] + [config_data["OWNER_ID"]]
 UNAUTH_MSG = "<b>Opps You Need To Donate Some Amount To Use Meh...🐸👀</b>"
 
+# FIX: Removed chat_id check. Authorization is strictly User ID based now.
 def is_sudo(message):
     user_id = message.from_user.id if message.from_user else 0
-    chat_id = message.chat.id
-    return user_id in config_data["AUTH_USERS"] or user_id == config_data["OWNER_ID"] or chat_id in config_data["AUTH_USERS"]
+    return user_id in config_data["AUTH_USERS"] or user_id == config_data["OWNER_ID"]
 
 def is_owner(message):
     user_id = message.from_user.id if message.from_user else 0
@@ -282,9 +281,6 @@ async def restart_cmd(client, message):
     with open("restart.json", "w") as f: json.dump({"chat_id": msg.chat.id, "message_id": msg.id}, f)
     os.execl(sys.executable, sys.executable, "-m", "bot")
 
-# ==========================================
-# 👑 OWNER ONLY COMMANDS
-# ==========================================
 @bot_app.on_message(filters.command("cancelall", prefixes=["/", "!", "."]))
 async def cancel_all_cmd(client, message):
     if not is_owner(message): return await message.reply(UNAUTH_MSG)
@@ -415,7 +411,6 @@ async def bsetting_cmd(client, message):
     )
     await message.reply(help_text, reply_markup=btn)
 
-# FIX: Added group=1 to prevent it from swallowing standard commands!
 @bot_app.on_message(filters.text & filters.private, group=1)
 async def bsetting_input_catcher(client, message):
     user_id = message.from_user.id

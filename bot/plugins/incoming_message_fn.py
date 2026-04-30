@@ -1,6 +1,5 @@
 from pyrogram import filters
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-# FIX: Native bot import
 from bot import bot_app, user_app, config_data
 from bot.helper_funcs.utils import queue, AppState, get_file_info
 import os
@@ -10,9 +9,9 @@ async def incoming_media(client, message):
     if message.caption and message.caption.startswith(("/", "!", ".")):
         return
 
+    # FIX: Removed chat_id check. Authorization is strictly User ID based now.
     user_id = message.from_user.id if message.from_user else 0
-    chat_id = message.chat.id
-    if user_id not in config_data["AUTH_USERS"] and user_id != config_data["OWNER_ID"] and chat_id not in config_data["AUTH_USERS"]:
+    if user_id not in config_data["AUTH_USERS"] and user_id != config_data["OWNER_ID"]:
         return await message.reply("<b>Opps You Need To Donate Some Amount To Use Meh...🐸👀</b>")
 
     media = message.video or message.document
@@ -60,7 +59,6 @@ async def incoming_media(client, message):
         quote=True
     )
 
-# FIX: Added group=2 to prevent it from swallowing commands in replies!
 @bot_app.on_message(filters.reply & filters.text, group=2)
 async def index_receiver(client, message):
     if not message.reply_to_message: return

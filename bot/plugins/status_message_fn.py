@@ -1,15 +1,14 @@
 import time
 import asyncio
 from pyrogram import filters
-# FIX: Native bot import
 from bot import bot_app, config_data
 from bot.helper_funcs.utils import AppState, TaskState, queue, get_sys_stats, get_network_io, get_readable_time, START_TIME
 from bot.helper_funcs.display_progress import humanbytes
 
+# FIX: Removed chat_id check. Authorization is strictly User ID based now.
 def is_sudo(message):
     user_id = message.from_user.id if message.from_user else 0
-    chat_id = message.chat.id
-    return user_id in config_data["AUTH_USERS"] or user_id == config_data["OWNER_ID"] or chat_id in config_data["AUTH_USERS"]
+    return user_id in config_data["AUTH_USERS"] or user_id == config_data["OWNER_ID"]
 
 @bot_app.on_message(filters.command("status", prefixes=["/", "!", "."]))
 async def status_cmd(client, message):

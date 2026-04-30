@@ -1,9 +1,19 @@
 version: '3.8'
 
 services:
-  compressor-bot:
+  bot:
     build: .
     container_name: subhasish_compressor
     restart: unless-stopped
+    # FIX: Initialize 'tini' to act as PID 1 to ruthlessly murder FFmpeg zombies
+    init: true
+    # FIX: Give FFmpeg 30 seconds to clean up gracefully before Docker murders it
+    stop_grace_period: 30s
+    # FIX: Removed the 'volumes: - .:/app' trap that was overwriting compiled C-extensions like tgcrypto!
     volumes:
-      - .:/app
+      # We ONLY bind the downloads folder and the config, NOT the whole app.
+      - ./downloads:/app/downloads
+      - ./config.json:/app/config.json
+    environment:
+      - PYTHONUNBUFFERED=1
+      - TZ=Asia/Kolkata

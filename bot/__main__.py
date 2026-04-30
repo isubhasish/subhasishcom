@@ -4,16 +4,9 @@ import time
 import json
 import asyncio
 from pyrogram import idle
-# FIX: 'from bot import' stops Python from executing __init__.py twice!
 from bot import bot_app, user_app, logger
 from bot.helper_funcs.utils import START_TIME, get_readable_time, AppState
 from bot.helper_funcs.ffmpeg import worker
-
-# Force Load ALL Plugins
-import bot.commands
-import bot.plugins.call_back_button_handler
-import bot.plugins.incoming_message_fn
-import bot.plugins.status_message_fn
 
 async def main():
     try:
