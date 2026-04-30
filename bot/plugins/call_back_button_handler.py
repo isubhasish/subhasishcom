@@ -55,22 +55,22 @@ async def panel_handler(client, cb):
 
     if action == "info":
         await cb.message.edit("📝 Probing MediaInfo...")
-        # FIX: Unique UUIDs prevent infinite freeze locks from overlapping files
         chunk_path = f"probe_{uuid.uuid4().hex}.mkv"
         
         try:
+            # FIX: Injected the Dynamic Client Router to prevent Bot-Only crashes!
+            active_client = user_app if user_app else bot_app
+            
             with open(chunk_path, "wb") as f:
                 dl_size = 0
-                async for chunk in user_app.stream_media(task['msg']):
+                async for chunk in active_client.stream_media(task['msg']):
                     f.write(chunk)
                     dl_size += len(chunk)
-                    # FIX: Huge 25MB probe buffer handles massive files smoothly
                     if dl_size >= 25 * 1024 * 1024:
                         break
                         
             size_str, _ = get_file_info(task['msg'])
             
-            # FIX: Process execution shield prevents zombie hangups
             process = await asyncio.create_subprocess_exec(
                 "mediainfo", chunk_path,
                 stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
@@ -126,9 +126,12 @@ async def panel_handler(client, cb):
         chunk_path = f"probe_{uuid.uuid4().hex}.mkv"
         
         try:
+            # FIX: Injected the Dynamic Client Router to prevent Bot-Only crashes!
+            active_client = user_app if user_app else bot_app
+            
             with open(chunk_path, "wb") as f:
                 dl_size = 0
-                async for chunk in user_app.stream_media(task['msg']):
+                async for chunk in active_client.stream_media(task['msg']):
                     f.write(chunk)
                     dl_size += len(chunk)
                     if dl_size >= 25 * 1024 * 1024:
@@ -243,7 +246,6 @@ async def bsetting_cb(client, cb):
             else: 
                 await cb.message.edit(f"✅ **{key}** successfully updated to `{v}`.\n\n✨ **𝘛𝘺𝘱𝘦 /𝘳𝘦𝘴𝘵𝘢𝘳𝘵 𝘵𝘰 𝘢𝘱𝘱𝘭𝘺.** ✨", reply_markup=btn)
                 
-            # Clean up the ghost text input!
             if "msg_to_delete" in AppState.bsetting_state[user_id]:
                 try: await client.delete_messages(chat_id=cb.message.chat.id, message_ids=AppState.bsetting_state[user_id]["msg_to_delete"])
                 except: pass
@@ -325,7 +327,6 @@ async def confirm_cancel_cb(client, cb):
 
     action = cb.matches[0].group(1)
     if action == "yes":
-        # FIX: The Central Authority. Callback only sets the flag and deletes its own menu. Worker handles the rest!
         if AppState.task_state == TaskState.CANCELLING:
             return await cb.answer("⚠️ Cancellation already in progress...", show_alert=True)
             

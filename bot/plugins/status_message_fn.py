@@ -10,11 +10,11 @@ def is_sudo(message):
     chat_id = message.chat.id
     return user_id in config_data["AUTH_USERS"] or user_id == config_data["OWNER_ID"] or chat_id in config_data["AUTH_USERS"]
 
-@bot_app.on_message(filters.command("status"))
+# FIX: Added aggressive prefixes to guarantee Supergroup responsiveness!
+@bot_app.on_message(filters.command("status", prefixes=["/", "!", "."]))
 async def status_cmd(client, message):
     if not is_sudo(message): return
     
-    # FIX: Uses the dedicated AppState snapshot, cleanly separating it from the main UI layout!
     if AppState.task_state != TaskState.IDLE and AppState.status_snapshot:
         text = AppState.status_snapshot
     else:

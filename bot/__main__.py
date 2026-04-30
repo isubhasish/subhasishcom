@@ -5,8 +5,14 @@ import json
 import asyncio
 from pyrogram import idle
 from bot.__init__ import bot_app, user_app, logger
-from bot.helper_funcs.utils import START_TIME, get_readable_time
+from bot.helper_funcs.utils import START_TIME, get_readable_time, AppState
 from bot.helper_funcs.ffmpeg import worker
+
+# FIX 1: Force Load ALL Plugins so Pyrogram registers the decorators!
+import bot.commands
+import bot.plugins.call_back_button_handler
+import bot.plugins.incoming_message_fn
+import bot.plugins.status_message_fn
 
 async def main():
     try:
@@ -16,11 +22,15 @@ async def main():
         await bot_app.start()
         logger.info("Bot Username detected: @%s", bot_app.me.username)
         
-        # FIX: Clean, precise start logic exactly as ChatGPT suggested
+        # FIX 2: Globally store the bot username for the watermark captions!
+        AppState.bot_username = bot_app.me.username
+        
         if user_app:
             logger.info("Booting Upload Client...")
             if not user_app.is_connected:
                 await user_app.start()
+            # FIX 3: Activate the 4GB Splitter logic globally
+            AppState.is_premium = True
             logger.info("✅ Upload Client (Userbot) Verified | Limit Status: Premium (4GB Uploads)")
         else:
             logger.info("✅ Running in Bot-Only Mode (2GB Limit)")
