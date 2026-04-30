@@ -16,7 +16,7 @@ from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from bot.__init__ import bot_app, user_app, config_data
 from bot.config import Config
 from bot.localisation import Localisation
-from bot.helper_funcs.utils import AppState, queue, START_TIME, get_readable_time, send_log, get_file_info, kill_running_process
+from bot.helper_funcs.utils import AppState, TaskState, queue, START_TIME, get_readable_time, send_log, get_file_info, kill_running_process
 from bot.helper_funcs.download import get_graph_link
 from bot.helper_funcs.display_progress import humanbytes
 
@@ -38,7 +38,7 @@ def get_uptime():
 
 async def auto_clean(msg, message):
     await asyncio.sleep(30)
-    if AppState.active_file_name == "None" and queue.qsize() == 0:
+    if AppState.task_state == TaskState.IDLE and queue.qsize() == 0:
         try:
             await msg.delete()
             await message.delete()
@@ -123,12 +123,11 @@ async def clear_cmd(client, message):
 @bot_app.on_message(filters.command("cancel"))
 async def cancel_cmd(client, message):
     if not is_sudo(message): return await message.reply(UNAUTH_MSG)
-    if AppState.active_file_name == "None": 
+    if AppState.task_state == TaskState.IDLE: 
         msg = await message.reply(Localisation.NO_ACTIVE_TASK)
         return asyncio.create_task(auto_clean(msg, message))
     btn = InlineKeyboardMarkup([[InlineKeyboardButton("Yes✅", callback_data="confirm_cancel_yes"), InlineKeyboardButton("No ❌", callback_data="confirm_cancel_no")]])
     
-    # FIX: Ensure prompt perfectly replies to the original video media!
     msg = await message.reply(Localisation.CANCEL_PROMPT, reply_markup=btn, quote=True)
     asyncio.create_task(auto_clean(msg, message))
 
@@ -161,7 +160,7 @@ async def mediainfo_cmd(client, message):
         process = await asyncio.create_subprocess_exec(
             "mediainfo", real_path,
             stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
-            start_new_session=True
+            preexec_fn=os.setsid
         )
         try:
             stdout, _ = await asyncio.wait_for(process.communicate(), timeout=30)
@@ -214,7 +213,7 @@ async def generate_sample_background(client, target_message, status_msg):
         process = await asyncio.create_subprocess_exec(
             "ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", file_path,
             stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
-            start_new_session=True
+            preexec_fn=os.setsid
         )
         try:
             stdout, _ = await asyncio.wait_for(process.communicate(), timeout=30)
@@ -236,7 +235,7 @@ async def generate_sample_background(client, target_message, status_msg):
         sample_out = f"Sample_{uuid.uuid4().hex}.mkv"
         cut_cmd = ["ffmpeg", "-ss", str(start_time), "-i", file_path, "-t", "30", "-c", "copy", "-y", sample_out]
         
-        process = await asyncio.create_subprocess_exec(*cut_cmd, start_new_session=True)
+        process = await asyncio.create_subprocess_exec(*cut_cmd, preexec_fn=os.setsid)
         await process.communicate()
 
         if not os.path.exists(sample_out):
@@ -258,7 +257,7 @@ async def generate_sample_background(client, target_message, status_msg):
 @bot_app.on_message(filters.command("samplegen"))
 async def samplegen_cmd(client, message):
     if not is_sudo(message): return await message.reply(UNAUTH_MSG)
-    if AppState.current_process or not queue.empty(): return await message.reply(Localisation.SAMPLE_BUSY)
+    if AppState.task_state != TaskState.IDLE or not queue.empty(): return await message.reply(Localisation.SAMPLE_BUSY)
     if not message.reply_to_message: return await message.reply("⚠️ Please reply to a video to generate a sample.")
     
     if getattr(message.reply_to_message, 'audio', None) or getattr(message.reply_to_message, 'voice', None):
@@ -328,6 +327,7 @@ async def speedtest_cmd(client, message):
         u_speed = humanbytes(res['upload'] / 8)
         ping = res['ping']
         
+        # FIX: Perfected your Speedtest layout!
         text = (
             f"🚀 <u>**sᴘᴇᴇᴅᴛᴇsᴛ ɪɴғᴏ**</u>\n\n"
             f"🔻 **ᴅᴏᴡɴʟᴏᴀᴅ:** `{d_speed}/s`\n"
@@ -340,7 +340,6 @@ async def speedtest_cmd(client, message):
         await msg.edit(f"❌ **Speedtest Failed:** {e}")
         
 def run_speedtest():
-    # FIX: Added secure=True to bypass 403 Forbidden errors on Oracle servers
     st = speedtest.Speedtest(secure=True)
     st.get_best_server()
     st.download()

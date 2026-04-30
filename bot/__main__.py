@@ -1,80 +1,53 @@
 import os
-import sys
-import json
-import asyncio
-import logging
-import shutil
-from pyrogram import idle
-from bot.__init__ import bot_app, user_app, config_data
+import subprocess
+from bot.__init__ import bot_app, user_app, logger
+from bot.helper_funcs.utils import queue, get_readable_time, START_TIME
 from bot.helper_funcs.ffmpeg import worker
-from bot.helper_funcs.utils import AppState
+import asyncio
 
-import bot.commands
-import bot.plugins.incoming_message_fn
-import bot.plugins.call_back_button_handler
-import bot.plugins.status_message_fn
-
-logging.getLogger("pyrogram").setLevel(logging.WARNING)
-logger = logging.getLogger(__name__)
-
-async def start_hybrid():
-    logger.info("Booting Bot Client...")
-    
-    if not shutil.which("ffmpeg"):
-        logger.error("❌ FFMPEG library isn't installed! Compression will fail.")
-    else:
-        logger.info("✅ FFMPEG is installed and ready.")
+async def main():
+    try:
+        # FIX: The OS sweeper. Forcefully kills any leftover PuTTY ffmpeg processes before the bot boots!
+        subprocess.run(["pkill", "-9", "-f", "ffmpeg"], stderr=subprocess.DEVNULL)
+        subprocess.run(["pkill", "-9", "-f", "ffprobe"], stderr=subprocess.DEVNULL)
         
-    await bot_app.start()
-    
-    me = await bot_app.get_me()
-    AppState.bot_username = me.username
-    logger.info(f"Bot Username detected: @{AppState.bot_username}")
-    
-    if os.path.exists("restart.json"):
-        try:
+        await bot_app.start()
+        logger.info("Bot Username detected: @%s", bot_app.me.username)
+        
+        if user_app:
+            logger.info("Booting Upload Client...")
+            await user_app.start()
+            logger.info("✅ Upload Client (Userbot) Verified | Limit Status: Premium (4GB Uploads)")
+        else:
+            logger.info("Booting Upload Client...")
+            logger.info("✅ Running in Bot-Only Mode (Upload Client skipped).")
+            logger.info("✅ Bot Token Verified | Limit Status: Standard MTProto (2GB Uploads)")
+            
+        logger.info("Subhasish Encoder is fully online!")
+        
+        asyncio.create_task(worker())
+        
+        if os.path.exists("restart.json"):
             with open("restart.json", "r") as f:
-                r_data = json.load(f)
-            await bot_app.edit_message_text(
-                chat_id=r_data["chat_id"],
-                message_id=r_data["message_id"],
-                text="✅ **Restarted successfully!**"
-            )
-        except Exception as e:
-            logger.error(f"Failed to edit restart message: {e}")
-        finally:
+                import json
+                data = json.load(f)
+                chat_id = data.get("chat_id")
+                msg_id = data.get("message_id")
+                if chat_id and msg_id:
+                    try:
+                        uptime = get_readable_time((time.time() - START_TIME)*1000)
+                        await bot_app.edit_message_text(chat_id, msg_id, f"✅ **Restart Successful!**\n⏰ **Boot Time:** `{uptime}`")
+                    except Exception as e:
+                        logger.error(f"Failed to edit restart msg: {e}")
             os.remove("restart.json")
-    
-    logger.info("Booting Upload Client...")
-    
-    # --- BUG FIX: THE HYBRID START PREVENTER ---
-    if user_app != bot_app:
-        await user_app.start()
-        logger.info("✅ User Session Client started successfully.")
-    else:
-        logger.info("✅ Running in Bot-Only Mode (Upload Client skipped).")
-    
-    # --- DYNAMIC LIMIT CHECKER ---
-    # Correctly validates if the account can handle 4GB or 2GB uploads via MTProto
-    if config_data.get("USER_SESSION_STRING"):
-        me_user = await user_app.get_me()
-        AppState.is_premium = me_user.is_premium
-        status_text = "Premium (4GB Uploads)" if AppState.is_premium else "Free Session (2GB Uploads)"
-        logger.info(f"✅ Session Verified | Limit Status: {status_text}")
-    else:
-        AppState.is_premium = False
-        logger.info("✅ Bot Token Verified | Limit Status: Standard MTProto (2GB Uploads)")
-    
-    asyncio.create_task(worker())
-    
-    logger.info("Subhasish Encoder is fully online!")
-    await idle()
-    
-    # --- BUG FIX: THE HYBRID STOP PREVENTER ---
-    await bot_app.stop()
-    if user_app != bot_app:
-        await user_app.stop()
+            
+        from pyrogram import idle
+        await idle()
+    except Exception as e:
+        logger.error(f"Fatal error in main loop: {e}")
+    finally:
+        await bot_app.stop()
+        if user_app: await user_app.stop()
 
 if __name__ == "__main__":
-    loop = asyncio.get_event_loop()
-    loop.run_until_complete(start_hybrid())
+    bot_app.run(main())

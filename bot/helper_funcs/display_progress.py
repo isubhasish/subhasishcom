@@ -11,7 +11,6 @@ def humanbytes(size):
     while size > power:
         size /= power
         n += 1
-    # FIX: Removed the buggy custom size math that distorted sizes!
     return f"{size:.2f} {Dic_powerN[n]}"
 
 def time_formatter(milliseconds: int) -> str:
@@ -26,8 +25,32 @@ def make_bar(percent):
     done = int(percent / (100 / 15))
     return "▣" * done + "□" * (15 - done)
 
+# FIX: Separate rendering engine just for the /status command!
+def render_active_status(percent, done_str, total_str, eta_str, speed_str, elapsed_str):
+    cpu, mem, disk = get_sys_stats()
+    import psutil
+    free_disk_gb = round(psutil.disk_usage('/').free / (1024**3), 2)
+    uptime_str = get_readable_time((time.time() - START_TIME)*1000)
+    net = psutil.net_io_counters()
+    
+    text = (
+        f"**🌐 Bᴏᴛ Sᴛᴀᴛɪsᴛɪᴄs 🌐**\n\n"
+        f"`{AppState.active_file_name}`\n"
+        f"[{make_bar(percent)}] {percent:.2f}%\n"
+        f"**Processed:** {done_str} **of** {total_str}\n"
+        f"**Status:** {AppState.task_state} | **ETA:** {eta_str}\n"
+        f"**Speed:** {speed_str}/s | **Elapsed:** {elapsed_str}\n\n"
+        f"**📥 Files in Queue:** {queue.qsize()}\n\n"
+        f"**🖥 Hardware Info:**\n"
+        f"**CPU:** {cpu}% | **Free:** {free_disk_gb}GB ({100-disk}%)\n"
+        f"**In:** {humanbytes(net.bytes_recv)} | **Out:** {humanbytes(net.bytes_sent)}\n"
+        f"**Ram:** {mem}% | **Uptime:** {uptime_str}\n\n"
+        f"**🏷Maintained By: @Subhasish_bot**"
+    )
+    return text
+
 async def progress_bar(current, total, status_text, message, start_time, last_update_time):
-    # FIX: ONLY raise CancelledError. Do NOT clear the flag early to avoid racing FFmpeg.
+    # FIX: ONLY trigger the hard break. Do not wipe the flag.
     if AppState.cancel_task:
         raise asyncio.CancelledError("Task Cancelled by User")
 
@@ -41,20 +64,26 @@ async def progress_bar(current, total, status_text, message, start_time, last_up
         
         if "Downloading" in status_text: header = "📥 Downloading ... 📥"
         elif "Uploading" in status_text: header = "📤 Uploading ... 📤"
-        else: header = "🔄 Processing ... 🔄"
+        else: header = "💡 ENCODING...💡"
+        
+        done_str = humanbytes(current)
+        total_str = humanbytes(total)
+        speed_str = humanbytes(speed)
+        eta_str = time_formatter(eta_ms)
+        elapsed_str = time_formatter((now - start_time)*1000)
 
-        # FIX: The Main UI is perfectly Phonetic. No 🌐 Bᴏᴛ Sᴛᴀᴛɪsᴛɪᴄs 🌐 header!
+        # FIX: AppState separates the UI variables so Main never overwrites /status!
+        AppState.status_snapshot = render_active_status(percent, done_str, total_str, eta_str, speed_str, elapsed_str)
+
         text = (
             f"ℹ️ **sᴛᴀᴛᴜs:** {header}\n\n"
-            f"`{AppState.active_file_name}`\n"
-            f"[{make_bar(percent)}] {percent:.2f}%\n"
-            f"⚡️ **ꜱᴘᴇᴇᴅ:** {humanbytes(speed)}/s\n"
-            f"⏰ **ᴇᴛᴀ:** {time_formatter(eta_ms)}\n"
-            f"📦 **sɪᴢᴇ:** {humanbytes(current)} / {humanbytes(total)}\n\n"
+            f"[{make_bar(percent)}]\n"
+            f"☞☢️ **ᴘʀᴏɢʀᴇss:** {percent:.2f}%\n"
+            f"📦 **sɪᴢᴇ:** {done_str} of {total_str}\n"
+            f"⚡️ **ꜱᴘᴇᴇᴅ:** {speed_str}/s\n"
+            f"⏱️ **ᴇᴛᴀ:** {eta_str}\n"
             f"🖥 CPU: {cpu}% | 💽 RAM: {mem}%"
         )
-        
-        AppState.last_progress_text = text 
         
         btn = InlineKeyboardMarkup([[InlineKeyboardButton("🛑 Cancel Task", callback_data="cancel_running")]])
         

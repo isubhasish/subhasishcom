@@ -9,21 +9,37 @@ from bot.__init__ import bot_app, logger, config_data
 queue = asyncio.Queue()
 START_TIME = time.time()
 
-# FIX: Added architecture-level cancellation locks and universal process tracking
+# FIX: Enterprise State Machine
+class TaskState:
+    IDLE = "Idle"
+    QUEUED = "Queued"
+    DOWNLOADING = "Downloading"
+    ENCODING = "Encoding"
+    UPLOADING = "Uploading"
+    CANCELLING = "Cancelling"
+
 class AppState:
     current_process = None
     process_lock = asyncio.Lock()
+    
     cancel_task = False
     cancelling = False
+    
+    task_state = TaskState.IDLE
     active_file_name = "None"
+    active_origin_msg = None
+    
+    # FIX: Splitting the UI variables prevents all overlap bugs!
+    main_progress_text = ""
+    status_snapshot = ""
+    
     pending_tasks = {}
     awaiting_index = {}
     bot_username = "Bot" 
     bsetting_state = {}  
     is_premium = False 
-    last_progress_text = ""
 
-# FIX: The Universal Zombie Killer. Exterminates process groups cleanly.
+# FIX: Universal OS Process Group Killer (Destroys PuTTY Zombies)
 async def kill_running_process():
     async with AppState.process_lock:
         proc = AppState.current_process
