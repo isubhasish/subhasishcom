@@ -2,6 +2,7 @@ import os
 import asyncio
 import time
 import re
+import traceback
 from datetime import datetime, timezone, timedelta
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from bot import bot_app, user_app, logger, config_data
@@ -9,6 +10,13 @@ from bot.config import Config
 from bot.localisation import Localisation
 from bot.helper_funcs.utils import queue, AppState, TaskState, get_ist, send_log, get_sys_stats, get_file_info, kill_running_process, get_readable_time, START_TIME
 from bot.helper_funcs.display_progress import progress_bar, humanbytes, time_formatter, make_bar, render_active_status
+
+# FIX: ChatGPT's Safe Readline to prevent infinite FFmpeg hangs
+async def safe_readline(stream, timeout=10):
+    try:
+        return await asyncio.wait_for(stream.readline(), timeout=timeout)
+    except asyncio.TimeoutError:
+        return None
 
 async def abort_current_task(status_msg, file_path=None, out=None):
     await kill_running_process()
@@ -44,7 +52,12 @@ async def worker():
     active_client = user_app if user_app else bot_app
     
     while True:
-        task = await queue.get()
+        try:
+            # FIX: Ensure queue.get doesn't block forever if recovery is needed
+            task = await asyncio.wait_for(queue.get(), timeout=30)
+        except asyncio.TimeoutError:
+            continue
+            
         msg, name, map_args, status_msg = task
         
         AppState.task_state = TaskState.DOWNLOADING
@@ -106,8 +119,6 @@ async def worker():
                 
             vf_string = ",".join(vf_filters)
             
-            # FIX: Enterprise Floating-Point parsing. 
-            # Allows exact decimals like "33.5" but safely falls back to "28" if the user types invalid text.
             try:
                 crf_val = str(float(config_data.get("CRF", "28")))
             except Exception:
@@ -138,8 +149,13 @@ async def worker():
                         await kill_running_process()
                         raise asyncio.CancelledError("Task Cancelled by User")
 
-                    line_bytes = await process.stderr.readline()
-                    if not line_bytes: break
+                    # FIX: Replaced blocking readline with safe async wrapper!
+                    line_bytes = await safe_readline(process.stderr)
+                    if not line_bytes: 
+                        if process.returncode is not None:
+                            break
+                        continue
+
                     line_str = line_bytes.decode('utf-8', errors='ignore').strip()
                     if not line_str: continue
 
@@ -289,7 +305,8 @@ async def worker():
             
             await send_log(f"**Upload Done, Bot is Free Now !!** \n\nProcess Done at {get_ist()}")
             
-        except Exception as e: logger.error(f"Fatal Worker Error: {e}")
+        except Exception as e: 
+            logger.error(f"[WORKER CRASHED] {e}\n{traceback.format_exc()}")
         finally: 
             await kill_running_process()
             if file_path and os.path.exists(file_path): os.remove(file_path)

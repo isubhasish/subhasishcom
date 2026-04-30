@@ -4,9 +4,9 @@ import re
 import uuid
 import signal
 import asyncio
+from functools import wraps
 from pyrogram import filters
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ForceReply
-# FIX: Native bot import
 from bot import bot_app, user_app, config_data
 from bot.config import Config
 from bot.helper_funcs.utils import AppState, TaskState, queue, get_file_info, kill_running_process
@@ -34,16 +34,34 @@ def get_bsetting_menu():
         [InlineKeyboardButton("❌ Close", callback_data="bsetting_close")]
     ])
 
+# FIX: Removed chat_id validation from the callback guard.
 def is_sudo(cb):
     user_id = cb.from_user.id
-    chat_id = cb.message.chat.id
-    return user_id in config_data["AUTH_USERS"] or user_id == config_data["OWNER_ID"] or chat_id in config_data["AUTH_USERS"]
+    return user_id in config_data["AUTH_USERS"] or user_id == config_data["OWNER_ID"]
+
+# FIX: ChatGPT's Safe Callback Guard to prevent "dead button" syndrome
+def safe_callback(func):
+    @wraps(func)
+    async def wrapper(client, cb):
+        try:
+            await cb.answer()  
+        except:
+            pass
+        try:
+            return await func(client, cb)
+        except Exception as e:
+            try:
+                await cb.message.edit(f"⚠️ **Error Occurred:**\n`{e}`")
+            except:
+                pass
+    return wrapper
 
 @bot_app.on_callback_query(filters.regex(r"^panel_(.*)"))
+@safe_callback
 async def panel_handler(client, cb):
     action, tid = cb.data.split("_")[1:3]
     task = AppState.pending_tasks.get(tid)
-    if not task: return await cb.answer("Task Expired", show_alert=True)
+    if not task: return await cb.message.edit("⚠️ Task Expired")
 
     if action == "close":
         if not is_sudo(cb): return await cb.answer("⚠️ Not Authorized!", show_alert=True)
@@ -167,6 +185,7 @@ async def panel_handler(client, cb):
         await bot_app.send_message(cb.message.chat.id, "Reply with indexes (e.g. 0,2,4):", reply_markup=ForceReply(selective=True))
 
 @bot_app.on_callback_query(filters.regex(r"^bsetting_(.*)"))
+@safe_callback
 async def bsetting_cb(client, cb):
     user_id = cb.from_user.id
     if user_id != config_data["OWNER_ID"]:
@@ -286,21 +305,8 @@ async def bsetting_cb(client, cb):
         )
         await cb.message.edit(help_text, reply_markup=get_bsetting_menu())
 
-@bot_app.on_callback_query(filters.regex(r"^delthumb_(.*)"))
-async def delthumb_cb(client, cb):
-    user_id = cb.from_user.id
-    if user_id != config_data["OWNER_ID"]:
-        return await cb.answer("⚠️ Only the Owner can delete thumbnails!", show_alert=True)
-
-    action = cb.matches[0].group(1)
-    if action == "yes":
-        path = os.path.join(Config.THUMB_DIR, f"{cb.from_user.id}.jpg")
-        if os.path.exists(path): os.remove(path)
-        await cb.message.edit(Localisation.THUMB_REMOVED)
-    else:
-        await cb.message.edit("❌ Thumbnail deletion cancelled.")
-
 @bot_app.on_callback_query(filters.regex("cancel_running"))
+@safe_callback
 async def cancel_running_cb(client, cb):
     if not is_sudo(cb):
         return await cb.answer("⚠️ You are not authorized to cancel this task!", show_alert=True)
@@ -320,6 +326,7 @@ async def cancel_running_cb(client, cb):
     )
 
 @bot_app.on_callback_query(filters.regex(r"^confirm_cancel_(.*)"))
+@safe_callback
 async def confirm_cancel_cb(client, cb):
     if not is_sudo(cb):
         return await cb.answer("⚠️ You are not authorized to cancel this task!", show_alert=True)
@@ -337,5 +344,24 @@ async def confirm_cancel_cb(client, cb):
             except: pass
         else: await cb.message.edit(Localisation.NO_ACTIVE_TASK)
     else:
+        try: await cb.message.delete()
+        except: pass
+
+# FIX: Restored delthumb callback
+@bot_app.on_callback_query(filters.regex(r"^delthumb_(.*)"))
+@safe_callback
+async def delthumb_cb(client, cb):
+    user_id = cb.from_user.id
+    if user_id != config_data["OWNER_ID"]:
+        return await cb.answer("⚠️ Only the Owner can delete thumbnails!", show_alert=True)
+
+    action = cb.matches[0].group(1)
+    if action == "yes":
+        path = os.path.join(Config.THUMB_DIR, f"{user_id}.jpg")
+        if os.path.exists(path): os.remove(path)
+        await cb.message.edit(Localisation.THUMB_REMOVED)
+    else:
+        await cb.message.edit("❌ Thumbnail deletion cancelled.")
+        await asyncio.sleep(2)
         try: await cb.message.delete()
         except: pass

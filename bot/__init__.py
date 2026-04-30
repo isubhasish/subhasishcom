@@ -17,13 +17,13 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# FIX: Added plugins dictionary so Pyrogram auto-discovers all decorators!
+# FIX: Changed "bot/plugins" to "bot.plugins" (Dot notation is REQUIRED by Python)
 bot_app = Client(
     "bot_session", 
     api_id=config_data["API_ID"], 
     api_hash=config_data["API_HASH"], 
     bot_token=config_data["TG_BOT_TOKEN"],
-    plugins=dict(root="bot/plugins") 
+    plugins=dict(root="bot.plugins") 
 )
 
 if config_data.get("USER_SESSION_STRING"):
