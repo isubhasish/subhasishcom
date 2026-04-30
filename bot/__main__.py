@@ -10,30 +10,25 @@ from bot.helper_funcs.ffmpeg import worker
 
 async def main():
     try:
-        # The OS sweeper. Forcefully kills any leftover PuTTY ffmpeg processes before the bot boots!
         subprocess.run(["pkill", "-9", "-f", "ffmpeg"], stderr=subprocess.DEVNULL)
         subprocess.run(["pkill", "-9", "-f", "ffprobe"], stderr=subprocess.DEVNULL)
         
-        # Start the Main Bot Client
         await bot_app.start()
         logger.info("Bot Username detected: @%s", bot_app.me.username)
         
-        # Start the Upload Client (Userbot) if configured
+        # FIX: Clean, precise start logic exactly as ChatGPT suggested
         if user_app:
             logger.info("Booting Upload Client...")
-            await user_app.start()
+            if not user_app.is_connected:
+                await user_app.start()
             logger.info("✅ Upload Client (Userbot) Verified | Limit Status: Premium (4GB Uploads)")
         else:
-            logger.info("Booting Upload Client...")
-            logger.info("✅ Running in Bot-Only Mode (Upload Client skipped).")
-            logger.info("✅ Bot Token Verified | Limit Status: Standard MTProto (2GB Uploads)")
+            logger.info("✅ Running in Bot-Only Mode (2GB Limit)")
             
         logger.info("Subhasish Encoder is fully online!")
         
-        # Start the background compression worker
         asyncio.create_task(worker())
         
-        # Handle post-restart UI updates
         if os.path.exists("restart.json"):
             try:
                 with open("restart.json", "r") as f:
@@ -53,13 +48,11 @@ async def main():
                 if os.path.exists("restart.json"):
                     os.remove("restart.json")
             
-        # Keep the process alive and listening for Telegram updates
         await idle()
         
     except Exception as e:
         logger.error(f"Fatal error in main loop: {e}")
     finally:
-        # Gracefully shut down both clients on exit
         try:
             await bot_app.stop()
         except Exception:
@@ -71,7 +64,6 @@ async def main():
                 pass
 
 if __name__ == "__main__":
-    # FIX: Use asyncio.run() instead of bot_app.run() to prevent connection conflicts
     try:
         asyncio.run(main())
     except KeyboardInterrupt:

@@ -10,7 +10,6 @@ from bot.localisation import Localisation
 from bot.helper_funcs.utils import queue, AppState, TaskState, get_ist, send_log, get_sys_stats, get_file_info, kill_running_process, get_readable_time, START_TIME
 from bot.helper_funcs.display_progress import progress_bar, humanbytes, time_formatter, make_bar, render_active_status
 
-# FIX: The Central Atomic Abort Protocol. Stops double cancel messages!
 async def abort_current_task(status_msg, file_path=None, out=None):
     await kill_running_process()
     for p in [file_path, out]:
@@ -35,7 +34,6 @@ async def take_screen_shot(video_file, output_directory, ttl):
     out_put_file_name = os.path.join(output_directory, f"{time.time()}_thumb.jpg")
     file_genertor_command = ["ffmpeg", "-ss", str(ttl), "-i", video_file, "-vframes", "1", out_put_file_name]
     try:
-        # FIX: os.setsid safely isolates background tasks to prevent zombies
         process = await asyncio.create_subprocess_exec(*file_genertor_command, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE, preexec_fn=os.setsid)
         await process.communicate()
         if os.path.lexists(out_put_file_name): return out_put_file_name
@@ -43,8 +41,10 @@ async def take_screen_shot(video_file, output_directory, ttl):
     return None
 
 async def worker():
+    # FIX: The Dynamic Client Router. Seamlessly switches between Premium Userbot and Standard Bot.
+    active_client = user_app if user_app else bot_app
+    
     while True:
-        # FIX: Queue removes the phantom 20 sec delay
         task = await queue.get()
         msg, name, map_args, status_msg = task
         
@@ -64,10 +64,10 @@ async def worker():
             now_time = get_ist()
             await send_log(f"**Bot Become Busy Now !!** \n\nDownload Started at {now_time}")
             
-            # FIX: Bulletproof Download Phase (No more fake success loops)
             download_cancelled = False
             try:
-                file_path = await user_app.download_media(msg, progress=progress_bar, progress_args=("Downloading", status_msg, start_time, last_up))
+                # Routed dynamically!
+                file_path = await active_client.download_media(msg, progress=progress_bar, progress_args=("Downloading", status_msg, start_time, last_up))
             except asyncio.CancelledError: download_cancelled = True
             except Exception as e:
                 if "Cancelled" in str(e) or "400" in str(e): download_cancelled = True
@@ -122,7 +122,6 @@ async def worker():
             encode_start_time = time.time()
             
             try:
-                # FIX: start_new_session=True + os.setsid creates an isolated room for perfect killpg reaping
                 process = await asyncio.create_subprocess_exec(*cmd, stderr=asyncio.subprocess.PIPE, preexec_fn=os.setsid)
                 async with AppState.process_lock:
                     AppState.current_process = process
@@ -188,7 +187,6 @@ async def worker():
                 if process.returncode != 0: raise asyncio.CancelledError("FFmpeg failed or cancelled")
                     
             except Exception as e:
-                # FIX: Strict Encode Cancellation Breaker
                 if AppState.cancel_task or isinstance(e, asyncio.CancelledError):
                     await abort_current_task(status_msg, file_path, out)
                     continue
@@ -249,13 +247,15 @@ async def worker():
                     
                     uploaded_msg = None
                     if as_doc:
-                        uploaded_msg = await user_app.send_document(
+                        # Routed dynamically!
+                        uploaded_msg = await active_client.send_document(
                             chat_id=msg.chat.id, document=upload_file, thumb=actual_thumb, caption=final_caption, force_document=True,
                             progress=progress_bar, progress_args=("Uploading", status_msg, upload_start, last_up_time),
                             reply_to_message_id=msg.id
                         )
                     else:
-                        uploaded_msg = await user_app.send_video(
+                        # Routed dynamically!
+                        uploaded_msg = await active_client.send_video(
                             chat_id=msg.chat.id, video=upload_file, thumb=actual_thumb, caption=final_caption,
                             progress=progress_bar, progress_args=("Uploading", status_msg, upload_start, last_up_time),
                             reply_to_message_id=msg.id
@@ -292,7 +292,6 @@ async def worker():
             if file_path and os.path.exists(file_path): os.remove(file_path)
             if actual_thumb and actual_thumb != custom_thumb and os.path.exists(actual_thumb): os.remove(actual_thumb)
             
-            # FIX: Total cleanup to completely protect the queue for the next file
             AppState.cancel_task = False
             AppState.active_file_name = "None"
             AppState.active_origin_msg = None

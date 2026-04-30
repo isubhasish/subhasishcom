@@ -31,7 +31,6 @@ bot_app = Client(
 )
 
 # --- SMART HYBRID FALLBACK (MTProto Native) ---
-# Bypasses 2GB limits if Premium Session exists. Falls back to MTProto 2GB Bot limits if empty.
 if config_data.get("USER_SESSION_STRING"):
     logger.info("✅ User Session detected. Evaluating Account Tier limits...")
     user_app = Client(
@@ -42,4 +41,5 @@ if config_data.get("USER_SESSION_STRING"):
     )
 else:
     logger.info("ℹ️ No USER_SESSION_STRING provided. Running securely on MTProto Bot Token (2.0 GB Upload/Download Limit).")
-    user_app = bot_app
+    # FIX: Explicitly set to None to prevent Pyrogram from double-starting the same client!
+    user_app = None
