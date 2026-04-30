@@ -8,6 +8,16 @@ from bot import bot_app, user_app, logger
 from bot.helper_funcs.utils import START_TIME, get_readable_time, AppState
 from bot.helper_funcs.ffmpeg import worker
 
+# ------------------------------------------------------------------
+# FIX: THE "GOLDEN SHIELD" EXPLICIT IMPORTS
+# These MUST be here to bypass Pyrogram's circular import deadlock
+# and guarantee the bot actually listens to commands.
+# ------------------------------------------------------------------
+import bot.plugins.commands
+import bot.plugins.call_back_button_handler
+import bot.plugins.incoming_message_fn
+import bot.plugins.status_message_fn
+
 async def main():
     try:
         subprocess.run(["pkill", "-9", "-f", "ffmpeg"], stderr=subprocess.DEVNULL)

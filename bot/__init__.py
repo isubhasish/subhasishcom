@@ -17,13 +17,15 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# FIX: Changed "bot/plugins" to "bot.plugins" (Dot notation is REQUIRED by Python)
+# ---------------------------------------------------------------------------
+# FIX: The Pyrogram 'plugins' arg is REMOVED. 
+# This completely destroys the Circular Import Deadlock preventing boot.
+# ---------------------------------------------------------------------------
 bot_app = Client(
     "bot_session", 
     api_id=config_data["API_ID"], 
     api_hash=config_data["API_HASH"], 
-    bot_token=config_data["TG_BOT_TOKEN"],
-    plugins=dict(root="bot.plugins") 
+    bot_token=config_data["TG_BOT_TOKEN"]
 )
 
 if config_data.get("USER_SESSION_STRING"):
