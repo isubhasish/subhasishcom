@@ -1,23 +1,23 @@
-FROM python:3.10-slim
-
-# Silence the red debconf warnings
-ENV DEBIAN_FRONTEND=noninteractive 
+FROM python:3.10-slim-bookworm
 
 RUN apt-get update && apt-get install -y \
     ffmpeg \
     mediainfo \
-    git \
+    tini \
     build-essential \
-    python3-dev \
+    procps \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
+
 COPY requirements.txt .
 
-# This is the magic line! It upgrades pip inside the container BEFORE installing requirements
-RUN pip3 install --upgrade pip
-RUN pip3 install --no-cache-dir -r requirements.txt
+RUN python -m venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+
+RUN pip install --upgrade pip && \
+    pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
-CMD ["python3", "-m", "bot"]
+CMD ["python", "-m", "bot"]

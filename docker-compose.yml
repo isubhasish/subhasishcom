@@ -1,9 +1,15 @@
 version: '3.8'
 
 services:
-  compressor-bot:
+  bot:
     build: .
     container_name: subhasish_compressor
     restart: unless-stopped
+    init: true
+    stop_grace_period: 30s
     volumes:
-      - .:/app
+      - ./downloads:/app/downloads
+      - ./config.json:/app/config.json
+    environment:
+      PYTHONUNBUFFERED: '1'
+      TZ: 'Asia/Kolkata'

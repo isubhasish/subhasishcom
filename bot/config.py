@@ -13,32 +13,44 @@ class Config:
     AUTH_USERS = [123456789]
     USER_SESSION_STRING = "" 
     
-    # FFmpeg Defaults
     CRF = "33.5"
     RESOLUTION = "820x480"
     AUDIO_BITRATE = "112k"
     PRESET = "fast"
     CODEC = "libx265"
     
-    # Advanced Settings
     WATERMARK_TEXT = "None"
     AS_DOCUMENT = True
 
-    @staticmethod
-    def load_config():
-        if not os.path.exists(Config.CONFIG_FILE):
-            default = {
-                "API_ID": Config.API_ID, "API_HASH": Config.API_HASH, "TG_BOT_TOKEN": Config.TG_BOT_TOKEN,
-                "OWNER_ID": Config.OWNER_ID, "LOG_CHANNEL": Config.LOG_CHANNEL, "AUTH_USERS": Config.AUTH_USERS,
-                "USER_SESSION_STRING": Config.USER_SESSION_STRING, "CRF": Config.CRF, 
-                "RESOLUTION": Config.RESOLUTION, "AUDIO_BITRATE": Config.AUDIO_BITRATE, 
-                "PRESET": Config.PRESET, "CODEC": Config.CODEC,
-                "WATERMARK_TEXT": Config.WATERMARK_TEXT, "AS_DOCUMENT": Config.AS_DOCUMENT
-            }
-            with open(Config.CONFIG_FILE, "w") as f: json.dump(default, f, indent=4)
-            return default
-        with open(Config.CONFIG_FILE, "r") as f: return json.load(f)
+    @classmethod
+    def load_config(cls):
+        if not os.path.exists(cls.CONFIG_FILE):
+            default_config = cls.get_default_config()
+            cls.save_config(default_config)
+            return default_config
+        with open(cls.CONFIG_FILE, "r") as file:
+            return json.load(file)
 
-    @staticmethod
-    def save_config(config_data):
-        with open(Config.CONFIG_FILE, "w") as f: json.dump(config_data, f, indent=4)
+    @classmethod
+    def save_config(cls, config_data):
+        with open(cls.CONFIG_FILE, "w") as file:
+            json.dump(config_data, file, indent=4)
+
+    @classmethod
+    def get_default_config(cls):
+        return {
+            "API_ID": cls.API_ID,
+            "API_HASH": cls.API_HASH,
+            "TG_BOT_TOKEN": cls.TG_BOT_TOKEN,
+            "OWNER_ID": cls.OWNER_ID,
+            "LOG_CHANNEL": cls.LOG_CHANNEL,
+            "AUTH_USERS": cls.AUTH_USERS,
+            "USER_SESSION_STRING": cls.USER_SESSION_STRING,
+            "CRF": cls.CRF,
+            "RESOLUTION": cls.RESOLUTION,
+            "AUDIO_BITRATE": cls.AUDIO_BITRATE,
+            "PRESET": cls.PRESET,
+            "CODEC": cls.CODEC,
+            "WATERMARK_TEXT": cls.WATERMARK_TEXT,
+            "AS_DOCUMENT": cls.AS_DOCUMENT
+        }
