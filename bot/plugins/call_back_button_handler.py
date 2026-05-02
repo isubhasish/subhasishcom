@@ -14,6 +14,7 @@ from bot.helper_funcs.download import get_graph_link
 from bot.localisation import Localisation
 
 QUEUE_MSG = "<b>Added To Queue... 🚦</b>\n<b>Please Be Patient, Your Compression Will Start Soon... 😊</b>"
+UNAUTH_MSG = "<b>You are not allowed to do that 🤭</b>"
 
 def get_bsetting_menu():
     return InlineKeyboardMarkup([
@@ -34,12 +35,17 @@ def get_bsetting_menu():
         [InlineKeyboardButton("❌ Close", callback_data="bsetting_close")]
     ])
 
-# FIX: Removed chat_id validation from the callback guard.
 def is_sudo(cb):
     user_id = cb.from_user.id
-    return user_id in config_data["AUTH_USERS"] or user_id == config_data["OWNER_ID"]
+    auth_users = config_data.get("AUTH_USERS", [])
+    owner_id = config_data.get("OWNER_ID", 0)
+    
+    if isinstance(auth_users, str):
+        try: auth_users = json.loads(auth_users)
+        except Exception: auth_users = []
+        
+    return user_id in auth_users or user_id == owner_id
 
-# FIX: ChatGPT's Safe Callback Guard to prevent "dead button" syndrome
 def safe_callback(func):
     @wraps(func)
     async def wrapper(client, cb):
@@ -64,7 +70,7 @@ async def panel_handler(client, cb):
     if not task: return await cb.message.edit("⚠️ Task Expired")
 
     if action == "close":
-        if not is_sudo(cb): return await cb.answer("⚠️ Not Authorized!", show_alert=True)
+        if not is_sudo(cb): return await cb.answer(UNAUTH_MSG, show_alert=True)
         AppState.pending_tasks.pop(tid, None)
         try:
             await cb.message.delete()
@@ -92,7 +98,7 @@ async def panel_handler(client, cb):
             process = await asyncio.create_subprocess_exec(
                 "mediainfo", chunk_path,
                 stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
-                preexec_fn=os.setsid
+                start_new_session=True
             )
             try:
                 stdout, _ = await asyncio.wait_for(process.communicate(), timeout=30)
@@ -126,14 +132,23 @@ async def panel_handler(client, cb):
                 content_json.append({"tag": "pre", "children": [current_pre]})
             
             link = await get_graph_link(content_json, title="Subhasish Encoder Mediainfo", author="Subhasish Encoder")
-            await cb.message.edit(f"📊 **MediaInfo Link:**\n{link}")
+            
+            btn = InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data=f"panel_back_{tid}")]])
+            await cb.message.edit(f"📊 **MediaInfo Link:**\n{link}", reply_markup=btn)
         except Exception as e:
             await cb.message.edit(f"❌ **MediaInfo Error:** `{e}`")
         finally:
             if os.path.exists(chunk_path): os.remove(chunk_path)
 
+    elif action == "back":
+        btn = InlineKeyboardMarkup([
+            [InlineKeyboardButton("▶️ ᴄᴏᴍᴘʀᴇss ▶️", callback_data=f"panel_all_{tid}"), InlineKeyboardButton("🎞 sᴇʟᴇᴄᴛ sᴛʀᴇᴀᴍ 🎞", callback_data=f"panel_select_{tid}")],
+            [InlineKeyboardButton("📊 ᴍᴇᴅɪᴀɪɴғᴏ 📊", callback_data=f"panel_info_{tid}"), InlineKeyboardButton("❌ ᴄʟᴏsᴇ ❌", callback_data=f"panel_close_{tid}")]
+        ])
+        await cb.message.edit("👇 Choose an action:", reply_markup=btn)
+
     elif action == "all":
-        if not is_sudo(cb): return await cb.answer("⚠️ Not Authorized!", show_alert=True)
+        if not is_sudo(cb): return await cb.answer(UNAUTH_MSG, show_alert=True)
         try: await cb.message.delete()
         except: pass
         new_status_msg = await bot_app.send_message(cb.message.chat.id, QUEUE_MSG, reply_to_message_id=task['msg'].id)
@@ -157,7 +172,7 @@ async def panel_handler(client, cb):
             process = await asyncio.create_subprocess_exec(
                 "ffprobe", "-v", "error", "-show_entries", "stream=index,codec_type,codec_name:stream_tags=language", "-of", "json", chunk_path,
                 stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
-                preexec_fn=os.setsid
+                start_new_session=True
             )
             try:
                 stdout, _ = await asyncio.wait_for(process.communicate(), timeout=30)
@@ -180,16 +195,16 @@ async def panel_handler(client, cb):
             if os.path.exists(chunk_path): os.remove(chunk_path)
 
     elif action == "input":
-        if not is_sudo(cb): return await cb.answer("⚠️ Not Authorized!", show_alert=True)
-        AppState.awaiting_index[cb.message.chat.id] = {"tid": tid, "menu_msg_id": cb.message.id}
-        await bot_app.send_message(cb.message.chat.id, "Reply with indexes (e.g. 0,2,4):", reply_markup=ForceReply(selective=True))
+        if not is_sudo(cb): return await cb.answer(UNAUTH_MSG, show_alert=True)
+        prompt = await cb.message.reply("Reply with indexes (e.g. 0,2,4):", quote=True, reply_markup=ForceReply(selective=True))
+        AppState.awaiting_index[cb.message.chat.id] = {"tid": tid, "menu_msg_id": prompt.id}
 
 @bot_app.on_callback_query(filters.regex(r"^bsetting_(.*)"))
 @safe_callback
 async def bsetting_cb(client, cb):
     user_id = cb.from_user.id
-    if user_id != config_data["OWNER_ID"]:
-        return await cb.answer("⚠️ Only the Owner can use these buttons!", show_alert=True)
+    if user_id != config_data.get("OWNER_ID", 0):
+        return await cb.answer(UNAUTH_MSG, show_alert=True)
         
     action = cb.matches[0].group(1)
 
@@ -309,15 +324,16 @@ async def bsetting_cb(client, cb):
 @safe_callback
 async def cancel_running_cb(client, cb):
     if not is_sudo(cb):
-        return await cb.answer("⚠️ You are not authorized to cancel this task!", show_alert=True)
+        return await cb.answer(UNAUTH_MSG, show_alert=True)
 
     if AppState.task_state == TaskState.IDLE:
         return await cb.answer("No active task.", show_alert=True)
         
     btn = InlineKeyboardMarkup([
-        [InlineKeyboardButton("Yes✅", callback_data="confirm_cancel_yes"), InlineKeyboardButton("No ❌", callback_data="confirm_cancel_no")]
+        [InlineKeyboardButton("Yes ✅", callback_data="confirm_cancel_yes"), InlineKeyboardButton("No ❌", callback_data="confirm_cancel_no")]
     ])
     
+    # FIX: Reverted to using Localisation.CANCEL_PROMPT
     await bot_app.send_message(
         cb.message.chat.id, 
         Localisation.CANCEL_PROMPT, 
@@ -329,7 +345,7 @@ async def cancel_running_cb(client, cb):
 @safe_callback
 async def confirm_cancel_cb(client, cb):
     if not is_sudo(cb):
-        return await cb.answer("⚠️ You are not authorized to cancel this task!", show_alert=True)
+        return await cb.answer(UNAUTH_MSG, show_alert=True)
 
     action = cb.matches[0].group(1)
     if action == "yes":
@@ -347,13 +363,12 @@ async def confirm_cancel_cb(client, cb):
         try: await cb.message.delete()
         except: pass
 
-# FIX: Restored delthumb callback
 @bot_app.on_callback_query(filters.regex(r"^delthumb_(.*)"))
 @safe_callback
 async def delthumb_cb(client, cb):
     user_id = cb.from_user.id
-    if user_id != config_data["OWNER_ID"]:
-        return await cb.answer("⚠️ Only the Owner can delete thumbnails!", show_alert=True)
+    if user_id != config_data.get("OWNER_ID", 0):
+        return await cb.answer(UNAUTH_MSG, show_alert=True)
 
     action = cb.matches[0].group(1)
     if action == "yes":

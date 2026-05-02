@@ -68,7 +68,10 @@ async def worker():
         file_path = None
         out = None
         actual_thumb = None 
+        
+        # FIX: Check for user custom thumb first, then fallback to the repo's default thumb.jpg
         custom_thumb = os.path.join(Config.THUMB_DIR, f"{msg.from_user.id}.jpg")
+        default_thumb = "thumb.jpg"
         
         try:
             now_time = get_ist()
@@ -140,6 +143,8 @@ async def worker():
                 async with AppState.process_lock:
                     AppState.current_process = process
                 last_update_time = time.time()
+                
+                # FIX: Applied bold/emoji layout to the button directly on the compressing message
                 btn = InlineKeyboardMarkup([[InlineKeyboardButton("🛑 Cancel Task", callback_data="cancel_running")]])
 
                 while True:
@@ -149,7 +154,6 @@ async def worker():
 
                     line_bytes = await safe_readline(process.stderr)
                     
-                    # FIX: Utilizing user's preferred syntax structure
                     if line_bytes is None:
                         continue 
                     if line_bytes == b"":
@@ -157,50 +161,51 @@ async def worker():
 
                     line_str = line_bytes.decode('utf-8', errors='ignore').strip()
                     
-                    # FIX: Utilizing user's preferred parsing block structure
                     if line_str:
+                        # FIX: Make the duration extraction highly aggressive so we don't get stuck at 0s
                         if not duration_sec and "Duration:" in line_str:
-                            match = re.search(r"Duration:\s*(\d{2}):(\d{2}):(\d{2})", line_str)
+                            match = re.search(r"Duration:\s*(\d+):(\d+):(\d+)", line_str)
                             if match: duration_sec = int(match.group(1))*3600 + int(match.group(2))*60 + int(match.group(3))
 
-                        if "time=" in line_str:
-                            time_match = re.search(r"time=(\d{2}):(\d{2}):(\d{2})\.", line_str)
-                            if not time_match: time_match = re.search(r"time=(\d{2}):(\d{2}):(\d{2})", line_str)
-                                
-                            if time_match and (time.time() - last_update_time > 8):
-                                curr_sec = int(time_match.group(1))*3600 + int(time_match.group(2))*60 + int(time_match.group(3))
-                                if duration_sec > 0:
-                                    percent = (curr_sec / duration_sec) * 100
-                                    elapsed = time.time() - encode_start_time
-                                    speed = curr_sec / elapsed if elapsed > 0 else 0
-                                    eta = (duration_sec - curr_sec) / speed if speed > 0 else 0
-                                    
-                                    cpu, mem, disk = get_sys_stats()
-                                    est_total_bytes = os.path.getsize(file_path) * 0.4 
-                                    current_bytes = (percent/100) * est_total_bytes
-                                    
-                                    done_str = humanbytes(current_bytes)
-                                    total_str = humanbytes(est_total_bytes)
-                                    speed_str = humanbytes(speed)
-                                    eta_str = time_formatter(eta*1000)
-                                    elapsed_str = time_formatter(elapsed*1000)
+                        # FIX: More robust time check to guarantee the UI updates
+                        time_match = re.search(r"time=\s*(\d+):(\d+):(\d+)", line_str)
+                        if time_match and (time.time() - last_update_time > 8):
+                            curr_sec = int(time_match.group(1))*3600 + int(time_match.group(2))*60 + int(time_match.group(3))
+                            
+                            # Safely prevent division by zero, but STILL force UI update
+                            safe_duration = duration_sec if duration_sec > 0 else (curr_sec + 1)
+                            
+                            percent = (curr_sec / safe_duration) * 100
+                            elapsed = time.time() - encode_start_time
+                            speed = curr_sec / elapsed if elapsed > 0 else 0
+                            eta = (safe_duration - curr_sec) / speed if speed > 0 else 0
+                            
+                            cpu, mem, disk = get_sys_stats()
+                            est_total_bytes = os.path.getsize(file_path) * 0.4 
+                            current_bytes = (percent/100) * est_total_bytes
+                            
+                            done_str = humanbytes(current_bytes)
+                            total_str = humanbytes(est_total_bytes)
+                            speed_str = humanbytes(speed)
+                            eta_str = time_formatter(eta*1000)
+                            elapsed_str = time_formatter(elapsed*1000)
 
-                                    AppState.status_snapshot = render_active_status(percent, done_str, total_str, eta_str, speed_str, elapsed_str)
+                            AppState.status_snapshot = render_active_status(percent, done_str, total_str, eta_str, speed_str, elapsed_str)
 
-                                    text = (
-                                        f"ℹ️ **ɴᴏᴡ:** 💡 ENCODING...💡\n\n"
-                                        f"⏱️ **ᴇᴛᴀ:** {eta_str}\n\n"
-                                        f"[{make_bar(percent)}] {percent:.2f}%\n\n"
-                                        f"⚡️ **ꜱᴘᴇᴇᴅ:** {speed_str}/s\n"
-                                        f"⏰ **ᴇʟᴀᴘsᴇᴅ:** {elapsed_str}\n"
-                                        f"📦 **sɪᴢᴇ:** {done_str} of {total_str}\n\n"
-                                        f"🖥 CPU: {cpu}% | 💽 RAM: {mem}%"
-                                    )
-                                    
-                                    try:
-                                        await status_msg.edit(text, reply_markup=btn)
-                                        last_update_time = time.time()
-                                    except: pass
+                            text = (
+                                f"ℹ️ **ɴᴏᴡ:** 💡 ENCODING...💡\n\n"
+                                f"⏱️ **ᴇᴛᴀ:** {eta_str}\n\n"
+                                f"[{make_bar(percent)}] {percent:.2f}%\n\n"
+                                f"⚡️ **ꜱᴘᴇᴇᴅ:** {speed_str}/s\n"
+                                f"⏰ **ᴇʟᴀᴘsᴇᴅ:** {elapsed_str}\n"
+                                f"📦 **sɪᴢᴇ:** {done_str} of {total_str}\n\n"
+                                f"🖥 CPU: {cpu}% | 💽 RAM: {mem}%"
+                            )
+                            
+                            try:
+                                await status_msg.edit(text, reply_markup=btn)
+                                last_update_time = time.time()
+                            except: pass
 
                 await process.wait()
                 async with AppState.process_lock:
@@ -248,8 +253,16 @@ async def worker():
 
             await send_log(f"**Uploading Video ...** \n\nProcess Started at {get_ist()}")
 
-            actual_thumb = custom_thumb if os.path.exists(custom_thumb) else None
-            if not actual_thumb and files_to_upload: actual_thumb = await take_screen_shot(files_to_upload[0], Config.THUMB_DIR, 5)
+            # FIX: Execute thumbnail fallback logic correctly
+            if os.path.exists(custom_thumb):
+                actual_thumb = custom_thumb
+            elif os.path.exists(default_thumb):
+                actual_thumb = default_thumb
+            else:
+                actual_thumb = None
+
+            if not actual_thumb and files_to_upload: 
+                actual_thumb = await take_screen_shot(files_to_upload[0], Config.THUMB_DIR, 5)
 
             as_doc = config_data.get("AS_DOCUMENT", True)
             upload_aborted = False
@@ -310,7 +323,9 @@ async def worker():
         finally: 
             await kill_running_process()
             if file_path and os.path.exists(file_path): os.remove(file_path)
-            if actual_thumb and actual_thumb != custom_thumb and os.path.exists(actual_thumb): os.remove(actual_thumb)
+            # FIX: Make sure we don't delete the default thumb or the custom thumb from disk!
+            if actual_thumb and actual_thumb != custom_thumb and actual_thumb != default_thumb and os.path.exists(actual_thumb): 
+                os.remove(actual_thumb)
             
             AppState.cancel_task = False
             AppState.active_file_name = "None"

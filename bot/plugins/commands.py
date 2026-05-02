@@ -19,14 +19,10 @@ from bot.localisation import Localisation
 from bot.helper_funcs.utils import AppState, TaskState, queue, START_TIME, get_readable_time, send_log, get_file_info, kill_running_process
 from bot.helper_funcs.download import get_graph_link
 from bot.helper_funcs.display_progress import humanbytes
-
-# FIX: Import the centralized settings menu to adhere to DRY principles.
 from bot.plugins.call_back_button_handler import get_bsetting_menu
 
-SUDO_USERS = config_data.get("AUTH_USERS", []) + [config_data.get("OWNER_ID", 0)]
-UNAUTH_MSG = "<b>Opps You Need To Donate Some Amount To Use Meh...🐸👀</b>"
+UNAUTH_MSG = "<b>You are not allowed to do that 🤭</b>"
 
-# FIX: Claude's Logic - Restored the chat_id check for Supergroup functionality.
 def is_sudo(message):
     user_id = message.from_user.id if message.from_user else 0
     chat_id = message.chat.id
@@ -55,12 +51,8 @@ async def auto_clean(msg, message):
             await message.delete()
         except: pass
 
-# ==========================================
-# 🟢 PUBLIC COMMANDS (Universally Accessible)
-# ==========================================
 @bot_app.on_message(filters.command("start"))
 async def start_cmd(client, message): 
-    # FIX: Removed is_sudo lock. /start is public again.
     await message.reply(Localisation.START_TEXT)
 
 @bot_app.on_message(filters.command("help"))
@@ -77,9 +69,6 @@ async def ping_cmd(client, message):
     await msg.edit(f"📶Pɪɴɢ = {ping_ms}ms\n⏰ **Uptime:** `{get_uptime()}`")
     asyncio.create_task(auto_clean(msg, message))
 
-# ==========================================
-# 🔴 SUDO COMMANDS
-# ==========================================
 @bot_app.on_message(filters.command("settings"))
 async def settings_cmd(client, message):
     if not is_sudo(message): return await message.reply(UNAUTH_MSG)
@@ -112,16 +101,12 @@ async def update_setting(message, key, display_name):
 
 @bot_app.on_message(filters.command("preset"))
 async def preset_cmd(client, message): await update_setting(message, "PRESET", "preset")
-
 @bot_app.on_message(filters.command("crf"))
 async def crf_cmd(client, message): await update_setting(message, "CRF", "crf")
-
 @bot_app.on_message(filters.command("audio"))
 async def audio_cmd(client, message): await update_setting(message, "AUDIO_BITRATE", "audio_bitrate")
-
 @bot_app.on_message(filters.command("resolution"))
 async def res_cmd(client, message): await update_setting(message, "RESOLUTION", "resolution")
-
 @bot_app.on_message(filters.command("codec"))
 async def codec_cmd(client, message): await update_setting(message, "CODEC", "codec")
 
@@ -138,7 +123,8 @@ async def cancel_cmd(client, message):
     if AppState.task_state == TaskState.IDLE: 
         msg = await message.reply(Localisation.NO_ACTIVE_TASK)
         return asyncio.create_task(auto_clean(msg, message))
-    btn = InlineKeyboardMarkup([[InlineKeyboardButton("Yes✅", callback_data="confirm_cancel_yes"), InlineKeyboardButton("No ❌", callback_data="confirm_cancel_no")]])
+    
+    btn = InlineKeyboardMarkup([[InlineKeyboardButton("Yes ✅", callback_data="confirm_cancel_yes"), InlineKeyboardButton("No ❌", callback_data="confirm_cancel_no")]])
     msg = await message.reply(Localisation.CANCEL_PROMPT, reply_markup=btn, quote=True)
     asyncio.create_task(auto_clean(msg, message))
 
@@ -162,20 +148,17 @@ async def mediainfo_cmd(client, message):
         
     msg = await message.reply("📝 Probing MediaInfo...")
     real_path = None
-    
     try:
         active_client = user_app if user_app else bot_app
         real_path = await active_client.download_media(message.reply_to_message)
-        if not real_path or not os.path.exists(real_path):
-            return await msg.edit("❌ Failed to download file for probing.")
+        if not real_path or not os.path.exists(real_path): return await msg.edit("❌ Failed to download file for probing.")
             
         process = await asyncio.create_subprocess_exec(
             "mediainfo", real_path,
             stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
             start_new_session=True 
         )
-        try:
-            stdout, _ = await asyncio.wait_for(process.communicate(), timeout=30)
+        try: stdout, _ = await asyncio.wait_for(process.communicate(), timeout=30)
         except asyncio.TimeoutError:
             try: os.killpg(os.getpgid(process.pid), signal.SIGKILL)
             except: pass
@@ -200,7 +183,6 @@ async def mediainfo_cmd(client, message):
                 if current_pre:
                     content_json.append({"tag": "pre", "children": [current_pre]})
                     current_pre = ""
-                    
                 icon = "📄" if clean_line == "General" else "🎬" if clean_line == "Video" else "💬" if clean_line == "Text" else "📑" if clean_line == "Menu" else "🔊"
                 content_json.append({"tag": "h3", "children": [f"{icon} {clean_line}"]})
             else:
@@ -228,15 +210,13 @@ async def generate_sample_background(client, target_message, status_msg):
             stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
             start_new_session=True 
         )
-        try:
-            stdout, _ = await asyncio.wait_for(process.communicate(), timeout=30)
+        try: stdout, _ = await asyncio.wait_for(process.communicate(), timeout=30)
         except asyncio.TimeoutError:
             try: os.killpg(os.getpgid(process.pid), signal.SIGKILL)
             except: pass
             raise Exception("FFProbe Process Timed Out")
             
         duration_output = stdout.decode('utf-8').strip()
-        
         try: total_duration = float(duration_output)
         except: total_duration = 0
             
@@ -257,9 +237,7 @@ async def generate_sample_background(client, target_message, status_msg):
 
         await status_msg.edit(Localisation.UPLOAD_START)
         caption = f"🎞 **Random 30s Sample**\n⏱ Cut from: `{time.strftime('%H:%M:%S', time.gmtime(start_time))}`\n\n<b>©ᴇɴᴄᴏᴅᴇᴅ Bʏ:</b> <b>@{AppState.bot_username}</b>"
-        
         await active_client.send_document(chat_id=status_msg.chat.id, document=sample_out, caption=caption, force_document=True, reply_to_message_id=target_message.id)
-        
         await status_msg.delete()
         os.remove(file_path); os.remove(sample_out)
     except Exception as e:
@@ -299,9 +277,6 @@ async def restart_cmd(client, message):
     with open("restart.json", "w") as f: json.dump({"chat_id": msg.chat.id, "message_id": msg.id}, f)
     os.execl(sys.executable, sys.executable, "-m", "bot")
 
-# ==========================================
-# 👑 OWNER ONLY COMMANDS
-# ==========================================
 @bot_app.on_message(filters.command("cancelall"))
 async def cancel_all_cmd(client, message):
     if not is_owner(message): return await message.reply(UNAUTH_MSG)
@@ -317,6 +292,7 @@ async def set_thumb(client, message):
     if not message.reply_to_message or not message.reply_to_message.photo: return await message.reply(Localisation.INVALID_THUMB)
     path = os.path.join(Config.THUMB_DIR, f"{message.from_user.id}.jpg")
     await message.reply_to_message.download(file_name=path)
+    
     await message.reply(Localisation.THUMB_ADDED)
 
 @bot_app.on_message(filters.command("delthumbnail"))
@@ -326,7 +302,8 @@ async def del_thumb_cmd(client, message):
     if not os.path.exists(path): 
         msg = await message.reply("⚠️ You don't have a custom thumbnail set.")
         return asyncio.create_task(auto_clean(msg, message))
-    btn = InlineKeyboardMarkup([[InlineKeyboardButton("Yes✅", callback_data="delthumb_yes"), InlineKeyboardButton("No ❌", callback_data="delthumb_no")]])
+        
+    btn = InlineKeyboardMarkup([[InlineKeyboardButton("Yes ✅", callback_data="delthumb_yes"), InlineKeyboardButton("No ❌", callback_data="delthumb_no")]])
     msg = await message.reply(Localisation.THUMB_WARNING, reply_markup=btn)
     asyncio.create_task(auto_clean(msg, message))
 
@@ -390,7 +367,6 @@ async def broadcast_cmd(client, message):
     b_msg = message.text.split(maxsplit=1)[1]
     success = 0
     failed = 0
-    
     auth_list = config_data.get('AUTH_USERS', [])
     await message.reply(f"📣 **Broadcasting to {len(auth_list)} users...**")
     
@@ -407,13 +383,11 @@ async def broadcast_cmd(client, message):
 @bot_app.on_message(filters.command("bsetting"))
 async def bsetting_cmd(client, message):
     if not is_owner(message): return await message.reply(UNAUTH_MSG)
-    
     help_text = (
         "**⚙️ Bot Settings Menu**\n"
         "Click a variable below to change its value interactively.\n"
         "✨ 𝘊𝘰𝘳𝘦 𝘴𝘺𝘴𝘵𝘦𝘮 𝘤𝘩𝘢𝘯𝘨𝘦𝘴 𝘳𝘦𝘲𝘶𝘪𝘳𝘦 𝘢 /𝘳𝘦𝘴𝘵𝘢𝘳𝘵 𝘵𝘰 𝘵𝘢𝘬𝘦 𝘧𝘶𝘭𝘭 𝘦𝘧𝘧𝘦𝘤𝘵 ✨"
     )
-    # FIX: Render the centralized menu directly.
     await message.reply(help_text, reply_markup=get_bsetting_menu())
 
 @bot_app.on_message(filters.text & filters.private, group=1)
@@ -448,14 +422,10 @@ async def bsetting_input_catcher(client, message):
              InlineKeyboardButton("❌ Close", callback_data="bsetting_close")]
         ])
         
-        if key in sensitive_keys:
-            text = f"❓ **Confirm {key}**\n\nSensitive credential detected.\nDo you want to securely save this?"
-        elif key == "USER_SESSION_STRING":
-            text = f"❓ **Confirm Update**\n\nNew session string received.\nDo you want to securely save this?"
-        elif key == "AS_DOCUMENT":
-            text = f"❓ **Confirm Update**\n\nYou entered **{val}**.\n✨ 𝘖𝘯𝘭𝘺 𝘵𝘺𝘱𝘦 𝘛𝘳𝘶𝘦 𝘰𝘳 𝘍𝘢𝘭𝘴𝘦 ✨\n\nDo you want to save this?"
-        else:
-            text = f"❓ **Confirm Update**\n\nYou entered a new value for **{key}**:\n`{val}`\n\nDo you want to save this?"
+        if key in sensitive_keys: text = f"❓ **Confirm {key}**\n\nSensitive credential detected.\nDo you want to securely save this?"
+        elif key == "USER_SESSION_STRING": text = f"❓ **Confirm Update**\n\nNew session string received.\nDo you want to securely save this?"
+        elif key == "AS_DOCUMENT": text = f"❓ **Confirm Update**\n\nYou entered **{val}**.\n✨ 𝘖𝘯𝘭𝘺 𝘵𝘺𝘱𝘦 𝘛𝘳𝘶𝘦 𝘰𝘳 𝘍𝘢𝘭𝘴𝘦 ✨\n\nDo you want to save this?"
+        else: text = f"❓ **Confirm Update**\n\nYou entered a new value for **{key}**:\n`{val}`\n\nDo you want to save this?"
             
         msg = await message.reply(text, reply_markup=btn)
         AppState.bsetting_state[user_id]["bot_msg_to_delete"] = msg.id

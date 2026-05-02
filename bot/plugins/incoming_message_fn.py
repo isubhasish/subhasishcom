@@ -6,10 +6,10 @@ from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from bot import bot_app, config_data
 from bot.helper_funcs.utils import queue, AppState, get_file_info
 
-UNAUTH_MSG = "<b>Opps You Need To Donate Some Amount To Use Meh...🐸👀</b>"
+# FIX: Applied the Unauth text globally
+UNAUTH_MSG = "<b>You are not allowed to do that 🤭</b>"
 QUEUE_MSG = "<b>Added To Queue... 🚦</b>\n<b>Please Be Patient, Your Compression Will Start Soon... 😊</b>"
 
-# FIX: Claude's Logic - Fully restored and fortified group auth checks.
 def is_sudo(message):
     user_id = message.from_user.id if message.from_user else 0
     chat_id = message.chat.id
@@ -22,13 +22,12 @@ def is_sudo(message):
         
     return user_id in auth_users or user_id == owner_id or chat_id in auth_users
 
-# This filter naturally lacks the prefixes list, so it is natively immune to the DeepSeek prefix bug.
-@bot_app.on_message((filters.video | filters.document) & ~filters.forwarded)
+# FIX: Removed ~filters.forwarded so it responds to forwarded files
+@bot_app.on_message(filters.video | filters.document)
 async def incoming_media(client, message):
     if message.caption and message.caption.startswith(("/", "!", ".")):
         return
 
-    # Utilizing the fortified is_sudo check
     if not is_sudo(message):
         if message.chat.type in [ChatType.GROUP, ChatType.SUPERGROUP]:
             return await bot_app.send_message(message.chat.id, UNAUTH_MSG, reply_to_message_id=message.id)
@@ -71,11 +70,13 @@ async def incoming_media(client, message):
          InlineKeyboardButton("❌ ᴄʟᴏsᴇ ❌", callback_data=f"panel_close_{tid}")]
     ])
     
+    # FIX: Applied your requested layout format perfectly
     await message.reply(
-        f"📥 **File Received:** `{file_name}`\n"
-        f"**Size:** {size_str}\n"
-        f"**Data Center:** {dc_str}\n\n"
-        f"👇 Choose an action:",
+        f"**🤔 What you want to do with this file? 🧐**\n\n"
+        f"**Name:** `{file_name}`\n"
+        f"**Size:** **{size_str}**\n"
+        f"**Data Center:** **{dc_str}**\n\n"
+        f"**🌞 Choose an Action: 👇**",
         reply_markup=btn,
         quote=True
     )

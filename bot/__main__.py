@@ -8,15 +8,14 @@ from bot import bot_app, user_app, logger
 from bot.helper_funcs.utils import START_TIME, get_readable_time, AppState
 from bot.helper_funcs.ffmpeg import worker
 
-# FIX: Explicit Imports bypass Pyrofork's Auto-Scanner bugs.
 import bot.plugins.commands
 import bot.plugins.call_back_button_handler
 import bot.plugins.incoming_message_fn
 import bot.plugins.status_message_fn
 
 async def main():
-    # FIX: Claude's Logic - Use async subprocesses to prevent blocking the event loop on boot!
     try:
+        # FIX: Non-blocking process cleanup
         p1 = await asyncio.create_subprocess_exec("pkill", "-9", "-f", "ffmpeg", stderr=asyncio.subprocess.DEVNULL)
         await p1.wait()
         p2 = await asyncio.create_subprocess_exec("pkill", "-9", "-f", "ffprobe", stderr=asyncio.subprocess.DEVNULL)
@@ -25,12 +24,15 @@ async def main():
         pass
         
     try:
+        # FIX: Fetch the default thumbnail gracefully on boot
+        logger.info("Fetching default universal thumbnail...")
+        os.system("wget -q https://telegra.ph/file/5c4635e173e7407694a63.jpg -O thumb.jpg")
+
         await bot_app.start()
         logger.info("Bot Username detected: @%s", bot_app.me.username)
         
         AppState.bot_username = bot_app.me.username
         
-        # Ensure we don't try to double-start the bot if user_app fell back to bot_app.
         if user_app != bot_app:
             logger.info("Booting Upload Client...")
             if not user_app.is_connected:
@@ -51,11 +53,11 @@ async def main():
                     chat_id = data.get("chat_id")
                     msg_id = data.get("message_id")
                     if chat_id and msg_id:
-                        uptime = get_readable_time((time.time() - START_TIME) * 1000)
+                        # FIX: Clean, custom restart message without Boot Time
                         await bot_app.edit_message_text(
                             chat_id, 
                             msg_id, 
-                            f"✅ **Restart Successful!**\n⏰ **Boot Time:** `{uptime}`"
+                            "Restarted successfully!"
                         )
             except Exception as e:
                 logger.error(f"Failed to edit restart msg: {e}")
@@ -63,7 +65,6 @@ async def main():
                 if os.path.exists("restart.json"):
                     os.remove("restart.json")
             
-        # FIX: Native idle to maintain the heartbeat connection.
         await idle()
         
     except Exception as e:
@@ -81,7 +82,6 @@ async def main():
 
 if __name__ == "__main__":
     try:
-        # FIX: Unified Event Loop to synchronize sockets and dispatchers.
         loop = asyncio.get_event_loop()
         loop.run_until_complete(main())
     except KeyboardInterrupt:
