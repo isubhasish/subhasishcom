@@ -8,7 +8,7 @@ config_data = Config.load_config()
 os.makedirs(Config.THUMB_DIR, exist_ok=True)
 
 logging.basicConfig(
-    level=logging.INFO, 
+    level=logging.INFO,
     format="%(asctime)s - [%(levelname)s] - %(message)s",
     handlers=[
         RotatingFileHandler("bot.log", maxBytes=20000000, backupCount=5),
@@ -17,14 +17,10 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# ---------------------------------------------------------------------------
-# FIX: The Pyrogram 'plugins' arg is REMOVED. 
-# This completely destroys the Circular Import Deadlock preventing boot.
-# ---------------------------------------------------------------------------
 bot_app = Client(
-    "bot_session", 
-    api_id=config_data["API_ID"], 
-    api_hash=config_data["API_HASH"], 
+    "bot_session",
+    api_id=config_data["API_ID"],
+    api_hash=config_data["API_HASH"],
     bot_token=config_data["TG_BOT_TOKEN"]
 )
 
@@ -33,9 +29,9 @@ if config_data.get("USER_SESSION_STRING"):
     user_app = Client(
         "user_session_string",
         session_string=config_data["USER_SESSION_STRING"],
-        api_id=config_data["API_ID"], 
+        api_id=config_data["API_ID"],
         api_hash=config_data["API_HASH"]
     )
 else:
-    logger.info("ℹ️ No USER_SESSION_STRING provided. Running securely on MTProto Bot Token (2.0 GB Upload/Download Limit).")
-    user_app = None
+    logger.info("ℹ️ No USER_SESSION_STRING. Running on Bot Token (2GB limit).")
+    user_app = bot_app  # ← CRITICAL: fallback to bot_app, never None

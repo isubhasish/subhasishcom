@@ -1,18 +1,39 @@
-from pyrogram import filters
-from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-from bot import bot_app, user_app, config_data
-from bot.helper_funcs.utils import queue, AppState, get_file_info
 import os
+import json
+from pyrogram import filters
+from pyrogram.enums import ChatType
+from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+from bot import bot_app, config_data
+from bot.helper_funcs.utils import queue, AppState, get_file_info
 
+UNAUTH_MSG = "<b>Opps You Need To Donate Some Amount To Use Meh...🐸👀</b>"
+QUEUE_MSG = "<b>Added To Queue... 🚦</b>\n<b>Please Be Patient, Your Compression Will Start Soon... 😊</b>"
+
+# FIX: Claude's Logic - Fully restored and fortified group auth checks.
+def is_sudo(message):
+    user_id = message.from_user.id if message.from_user else 0
+    chat_id = message.chat.id
+    auth_users = config_data.get("AUTH_USERS", [])
+    owner_id = config_data.get("OWNER_ID", 0)
+    
+    if isinstance(auth_users, str):
+        try: auth_users = json.loads(auth_users)
+        except Exception: auth_users = []
+        
+    return user_id in auth_users or user_id == owner_id or chat_id in auth_users
+
+# This filter naturally lacks the prefixes list, so it is natively immune to the DeepSeek prefix bug.
 @bot_app.on_message((filters.video | filters.document) & ~filters.forwarded)
 async def incoming_media(client, message):
     if message.caption and message.caption.startswith(("/", "!", ".")):
         return
 
-    # FIX: Removed chat_id check. Authorization is strictly User ID based now.
-    user_id = message.from_user.id if message.from_user else 0
-    if user_id not in config_data["AUTH_USERS"] and user_id != config_data["OWNER_ID"]:
-        return await message.reply("<b>Opps You Need To Donate Some Amount To Use Meh...🐸👀</b>")
+    # Utilizing the fortified is_sudo check
+    if not is_sudo(message):
+        if message.chat.type in [ChatType.GROUP, ChatType.SUPERGROUP]:
+            return await bot_app.send_message(message.chat.id, UNAUTH_MSG, reply_to_message_id=message.id)
+        else:
+            return await message.reply(UNAUTH_MSG)
 
     media = message.video or message.document
     if not media:
@@ -61,6 +82,7 @@ async def incoming_media(client, message):
 
 @bot_app.on_message(filters.reply & filters.text, group=2)
 async def index_receiver(client, message):
+    if not is_sudo(message): return
     if not message.reply_to_message: return
     
     chat_id = message.chat.id
@@ -84,7 +106,7 @@ async def index_receiver(client, message):
             
             del AppState.awaiting_index[chat_id]
             
-            new_status_msg = await bot_app.send_message(chat_id, "<b>Added To Queue... 🚦</b>\n<b>Please Be Patient, Your Compression Will Start Soon... 😊</b>", reply_to_message_id=task['msg'].id)
+            new_status_msg = await bot_app.send_message(chat_id, QUEUE_MSG, reply_to_message_id=task['msg'].id)
             await queue.put((task['msg'], task['name'], map_args, new_status_msg))
             
         except ValueError:

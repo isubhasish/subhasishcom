@@ -1,16 +1,26 @@
 import time
+import json
 import asyncio
 from pyrogram import filters
 from bot import bot_app, config_data
 from bot.helper_funcs.utils import AppState, TaskState, queue, get_sys_stats, get_network_io, get_readable_time, START_TIME
 from bot.helper_funcs.display_progress import humanbytes
 
-# FIX: Removed chat_id check. Authorization is strictly User ID based now.
+# FIX: Claude's Logic - Restored chat_id check for Supergroup functionality & used safe parsing.
 def is_sudo(message):
     user_id = message.from_user.id if message.from_user else 0
-    return user_id in config_data["AUTH_USERS"] or user_id == config_data["OWNER_ID"]
+    chat_id = message.chat.id
+    auth_users = config_data.get("AUTH_USERS", [])
+    owner_id = config_data.get("OWNER_ID", 0)
+    
+    if isinstance(auth_users, str):
+        try: auth_users = json.loads(auth_users)
+        except Exception: auth_users = []
+        
+    return user_id in auth_users or user_id == owner_id or chat_id in auth_users
 
-@bot_app.on_message(filters.command("status", prefixes=["/", "!", "."]))
+# FIX: DeepSeek's Logic - Removed the buggy prefixes list to ensure the command always fires.
+@bot_app.on_message(filters.command("status"))
 async def status_cmd(client, message):
     if not is_sudo(message): return
     

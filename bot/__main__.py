@@ -1,5 +1,5 @@
 import os
-import subprocess
+import sys
 import time
 import json
 import asyncio
@@ -8,26 +8,30 @@ from bot import bot_app, user_app, logger
 from bot.helper_funcs.utils import START_TIME, get_readable_time, AppState
 from bot.helper_funcs.ffmpeg import worker
 
-# ------------------------------------------------------------------
-# FIX 1: THE "GOLDEN SHIELD" EXPLICIT IMPORTS
-# Prevents Pyrogram circular import deadlocks.
-# ------------------------------------------------------------------
+# FIX: Explicit Imports bypass Pyrofork's Auto-Scanner bugs.
 import bot.plugins.commands
 import bot.plugins.call_back_button_handler
 import bot.plugins.incoming_message_fn
 import bot.plugins.status_message_fn
 
 async def main():
+    # FIX: Claude's Logic - Use async subprocesses to prevent blocking the event loop on boot!
     try:
-        subprocess.run(["pkill", "-9", "-f", "ffmpeg"], stderr=subprocess.DEVNULL)
-        subprocess.run(["pkill", "-9", "-f", "ffprobe"], stderr=subprocess.DEVNULL)
+        p1 = await asyncio.create_subprocess_exec("pkill", "-9", "-f", "ffmpeg", stderr=asyncio.subprocess.DEVNULL)
+        await p1.wait()
+        p2 = await asyncio.create_subprocess_exec("pkill", "-9", "-f", "ffprobe", stderr=asyncio.subprocess.DEVNULL)
+        await p2.wait()
+    except Exception:
+        pass
         
+    try:
         await bot_app.start()
         logger.info("Bot Username detected: @%s", bot_app.me.username)
         
         AppState.bot_username = bot_app.me.username
         
-        if user_app:
+        # Ensure we don't try to double-start the bot if user_app fell back to bot_app.
+        if user_app != bot_app:
             logger.info("Booting Upload Client...")
             if not user_app.is_connected:
                 await user_app.start()
@@ -37,6 +41,8 @@ async def main():
             logger.info("✅ Running in Bot-Only Mode (2GB Limit)")
             
         logger.info("Subhasish Encoder is fully online!")
+        
+        asyncio.create_task(worker())
         
         if os.path.exists("restart.json"):
             try:
@@ -56,18 +62,9 @@ async def main():
             finally:
                 if os.path.exists("restart.json"):
                     os.remove("restart.json")
-
-        # ------------------------------------------------------------------
-        # FIX 2: ENTERPRISE CONCURRENCY (DEEPSEEK'S FIX)
-        # Prevents Pyrogram's idle() from deadlocking the event loop.
-        # ------------------------------------------------------------------
-        async def idle_forever():
-            await asyncio.Event().wait()
-
-        await asyncio.gather(
-            worker(),       # Starts the background queue processor
-            idle_forever()  # Keeps the loop alive concurrently
-        )
+            
+        # FIX: Native idle to maintain the heartbeat connection.
+        await idle()
         
     except Exception as e:
         logger.error(f"Fatal error in main loop: {e}")
@@ -76,7 +73,7 @@ async def main():
             await bot_app.stop()
         except Exception:
             pass
-        if user_app:
+        if user_app != bot_app:
             try:
                 await user_app.stop()
             except Exception:
@@ -84,6 +81,8 @@ async def main():
 
 if __name__ == "__main__":
     try:
-        asyncio.run(main())
+        # FIX: Unified Event Loop to synchronize sockets and dispatchers.
+        loop = asyncio.get_event_loop()
+        loop.run_until_complete(main())
     except KeyboardInterrupt:
         logger.info("Bot stopped by user.")

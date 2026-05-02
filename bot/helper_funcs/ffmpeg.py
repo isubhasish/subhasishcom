@@ -11,12 +11,11 @@ from bot.localisation import Localisation
 from bot.helper_funcs.utils import queue, AppState, TaskState, get_ist, send_log, get_sys_stats, get_file_info, kill_running_process, get_readable_time, START_TIME
 from bot.helper_funcs.display_progress import progress_bar, humanbytes, time_formatter, make_bar, render_active_status
 
-# FIX: ChatGPT's Safe Readline to prevent infinite FFmpeg hangs
 async def safe_readline(stream, timeout=10):
     try:
         return await asyncio.wait_for(stream.readline(), timeout=timeout)
     except asyncio.TimeoutError:
-        return None
+        return None  
 
 async def abort_current_task(status_msg, file_path=None, out=None):
     await kill_running_process()
@@ -42,7 +41,7 @@ async def take_screen_shot(video_file, output_directory, ttl):
     out_put_file_name = os.path.join(output_directory, f"{time.time()}_thumb.jpg")
     file_genertor_command = ["ffmpeg", "-ss", str(ttl), "-i", video_file, "-vframes", "1", out_put_file_name]
     try:
-        process = await asyncio.create_subprocess_exec(*file_genertor_command, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE, preexec_fn=os.setsid)
+        process = await asyncio.create_subprocess_exec(*file_genertor_command, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE, start_new_session=True)
         await process.communicate()
         if os.path.lexists(out_put_file_name): return out_put_file_name
     except Exception as e: logger.error(f"Failed to generate auto-thumbnail: {e}")
@@ -53,7 +52,6 @@ async def worker():
     
     while True:
         try:
-            # FIX: Ensure queue.get doesn't block forever if recovery is needed
             task = await asyncio.wait_for(queue.get(), timeout=30)
         except asyncio.TimeoutError:
             continue
@@ -138,7 +136,7 @@ async def worker():
             encode_start_time = time.time()
             
             try:
-                process = await asyncio.create_subprocess_exec(*cmd, stderr=asyncio.subprocess.PIPE, preexec_fn=os.setsid)
+                process = await asyncio.create_subprocess_exec(*cmd, stderr=asyncio.subprocess.PIPE, start_new_session=True)
                 async with AppState.process_lock:
                     AppState.current_process = process
                 last_update_time = time.time()
@@ -149,58 +147,60 @@ async def worker():
                         await kill_running_process()
                         raise asyncio.CancelledError("Task Cancelled by User")
 
-                    # FIX: Replaced blocking readline with safe async wrapper!
                     line_bytes = await safe_readline(process.stderr)
-                    if not line_bytes: 
-                        if process.returncode is not None:
-                            break
-                        continue
+                    
+                    # FIX: Utilizing user's preferred syntax structure
+                    if line_bytes is None:
+                        continue 
+                    if line_bytes == b"":
+                        break    
 
                     line_str = line_bytes.decode('utf-8', errors='ignore').strip()
-                    if not line_str: continue
+                    
+                    # FIX: Utilizing user's preferred parsing block structure
+                    if line_str:
+                        if not duration_sec and "Duration:" in line_str:
+                            match = re.search(r"Duration:\s*(\d{2}):(\d{2}):(\d{2})", line_str)
+                            if match: duration_sec = int(match.group(1))*3600 + int(match.group(2))*60 + int(match.group(3))
 
-                    if not duration_sec and "Duration:" in line_str:
-                        match = re.search(r"Duration:\s*(\d{2}):(\d{2}):(\d{2})", line_str)
-                        if match: duration_sec = int(match.group(1))*3600 + int(match.group(2))*60 + int(match.group(3))
-
-                    if "time=" in line_str:
-                        time_match = re.search(r"time=(\d{2}):(\d{2}):(\d{2})\.", line_str)
-                        if not time_match: time_match = re.search(r"time=(\d{2}):(\d{2}):(\d{2})", line_str)
-                            
-                        if time_match and (time.time() - last_update_time > 8):
-                            curr_sec = int(time_match.group(1))*3600 + int(time_match.group(2))*60 + int(time_match.group(3))
-                            if duration_sec > 0:
-                                percent = (curr_sec / duration_sec) * 100
-                                elapsed = time.time() - encode_start_time
-                                speed = curr_sec / elapsed if elapsed > 0 else 0
-                                eta = (duration_sec - curr_sec) / speed if speed > 0 else 0
+                        if "time=" in line_str:
+                            time_match = re.search(r"time=(\d{2}):(\d{2}):(\d{2})\.", line_str)
+                            if not time_match: time_match = re.search(r"time=(\d{2}):(\d{2}):(\d{2})", line_str)
                                 
-                                cpu, mem, disk = get_sys_stats()
-                                est_total_bytes = os.path.getsize(file_path) * 0.4 
-                                current_bytes = (percent/100) * est_total_bytes
-                                
-                                done_str = humanbytes(current_bytes)
-                                total_str = humanbytes(est_total_bytes)
-                                speed_str = humanbytes(speed)
-                                eta_str = time_formatter(eta*1000)
-                                elapsed_str = time_formatter(elapsed*1000)
+                            if time_match and (time.time() - last_update_time > 8):
+                                curr_sec = int(time_match.group(1))*3600 + int(time_match.group(2))*60 + int(time_match.group(3))
+                                if duration_sec > 0:
+                                    percent = (curr_sec / duration_sec) * 100
+                                    elapsed = time.time() - encode_start_time
+                                    speed = curr_sec / elapsed if elapsed > 0 else 0
+                                    eta = (duration_sec - curr_sec) / speed if speed > 0 else 0
+                                    
+                                    cpu, mem, disk = get_sys_stats()
+                                    est_total_bytes = os.path.getsize(file_path) * 0.4 
+                                    current_bytes = (percent/100) * est_total_bytes
+                                    
+                                    done_str = humanbytes(current_bytes)
+                                    total_str = humanbytes(est_total_bytes)
+                                    speed_str = humanbytes(speed)
+                                    eta_str = time_formatter(eta*1000)
+                                    elapsed_str = time_formatter(elapsed*1000)
 
-                                AppState.status_snapshot = render_active_status(percent, done_str, total_str, eta_str, speed_str, elapsed_str)
+                                    AppState.status_snapshot = render_active_status(percent, done_str, total_str, eta_str, speed_str, elapsed_str)
 
-                                text = (
-                                    f"ℹ️ **ɴᴏᴡ:** 💡 ENCODING...💡\n\n"
-                                    f"⏱️ **ᴇᴛᴀ:** {eta_str}\n\n"
-                                    f"[{make_bar(percent)}] {percent:.2f}%\n\n"
-                                    f"⚡️ **ꜱᴘᴇᴇᴅ:** {speed_str}/s\n"
-                                    f"⏰ **ᴇʟᴀᴘsᴇᴅ:** {elapsed_str}\n"
-                                    f"📦 **sɪᴢᴇ:** {done_str} of {total_str}\n\n"
-                                    f"🖥 CPU: {cpu}% | 💽 RAM: {mem}%"
-                                )
-                                
-                                try:
-                                    await status_msg.edit(text, reply_markup=btn)
-                                    last_update_time = time.time()
-                                except: pass
+                                    text = (
+                                        f"ℹ️ **ɴᴏᴡ:** 💡 ENCODING...💡\n\n"
+                                        f"⏱️ **ᴇᴛᴀ:** {eta_str}\n\n"
+                                        f"[{make_bar(percent)}] {percent:.2f}%\n\n"
+                                        f"⚡️ **ꜱᴘᴇᴇᴅ:** {speed_str}/s\n"
+                                        f"⏰ **ᴇʟᴀᴘsᴇᴅ:** {elapsed_str}\n"
+                                        f"📦 **sɪᴢᴇ:** {done_str} of {total_str}\n\n"
+                                        f"🖥 CPU: {cpu}% | 💽 RAM: {mem}%"
+                                    )
+                                    
+                                    try:
+                                        await status_msg.edit(text, reply_markup=btn)
+                                        last_update_time = time.time()
+                                    except: pass
 
                 await process.wait()
                 async with AppState.process_lock:
@@ -241,7 +241,7 @@ async def worker():
                     split_time = f"{st_h:02d}:{st_m:02d}:{st_s:02d}"
 
                 split_cmd = ["ffmpeg", "-i", out, "-c", "copy", "-f", "segment", "-segment_time", split_time, "-reset_timestamps", "1", f"{base_name}_part%03d{ext}"]
-                s_proc = await asyncio.create_subprocess_exec(*split_cmd, preexec_fn=os.setsid)
+                s_proc = await asyncio.create_subprocess_exec(*split_cmd, start_new_session=True)
                 await s_proc.communicate()
                 files_to_upload = sorted([f for f in os.listdir(".") if f.startswith(base_name + "_part") and f.endswith(ext)])
                 os.remove(out) 

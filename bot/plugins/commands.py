@@ -20,17 +20,28 @@ from bot.helper_funcs.utils import AppState, TaskState, queue, START_TIME, get_r
 from bot.helper_funcs.download import get_graph_link
 from bot.helper_funcs.display_progress import humanbytes
 
-SUDO_USERS = config_data["AUTH_USERS"] + [config_data["OWNER_ID"]]
+# FIX: Import the centralized settings menu to adhere to DRY principles.
+from bot.plugins.call_back_button_handler import get_bsetting_menu
+
+SUDO_USERS = config_data.get("AUTH_USERS", []) + [config_data.get("OWNER_ID", 0)]
 UNAUTH_MSG = "<b>Opps You Need To Donate Some Amount To Use Meh...🐸👀</b>"
 
-# FIX: Removed chat_id check. Authorization is strictly User ID based now.
+# FIX: Claude's Logic - Restored the chat_id check for Supergroup functionality.
 def is_sudo(message):
     user_id = message.from_user.id if message.from_user else 0
-    return user_id in config_data["AUTH_USERS"] or user_id == config_data["OWNER_ID"]
+    chat_id = message.chat.id
+    auth_users = config_data.get("AUTH_USERS", [])
+    owner_id = config_data.get("OWNER_ID", 0)
+    
+    if isinstance(auth_users, str):
+        try: auth_users = json.loads(auth_users)
+        except Exception: auth_users = []
+        
+    return user_id in auth_users or user_id == owner_id or chat_id in auth_users
 
 def is_owner(message):
     user_id = message.from_user.id if message.from_user else 0
-    return user_id == config_data["OWNER_ID"]
+    return user_id == config_data.get("OWNER_ID", 0)
 
 def get_uptime():
     uptime_ms = int((time.time() - START_TIME) * 1000)
@@ -44,16 +55,20 @@ async def auto_clean(msg, message):
             await message.delete()
         except: pass
 
-@bot_app.on_message(filters.command("start", prefixes=["/", "!", "."]))
+# ==========================================
+# 🟢 PUBLIC COMMANDS (Universally Accessible)
+# ==========================================
+@bot_app.on_message(filters.command("start"))
 async def start_cmd(client, message): 
+    # FIX: Removed is_sudo lock. /start is public again.
     await message.reply(Localisation.START_TEXT)
 
-@bot_app.on_message(filters.command("help", prefixes=["/", "!", "."]))
+@bot_app.on_message(filters.command("help"))
 async def help_cmd(client, message): 
     msg = await message.reply(Localisation.HELP_TEXT)
     asyncio.create_task(auto_clean(msg, message))
 
-@bot_app.on_message(filters.command("ping", prefixes=["/", "!", "."]))
+@bot_app.on_message(filters.command("ping"))
 async def ping_cmd(client, message):
     start_t = time.time()
     msg = await message.reply("...")
@@ -62,7 +77,10 @@ async def ping_cmd(client, message):
     await msg.edit(f"📶Pɪɴɢ = {ping_ms}ms\n⏰ **Uptime:** `{get_uptime()}`")
     asyncio.create_task(auto_clean(msg, message))
 
-@bot_app.on_message(filters.command("settings", prefixes=["/", "!", "."]))
+# ==========================================
+# 🔴 SUDO COMMANDS
+# ==========================================
+@bot_app.on_message(filters.command("settings"))
 async def settings_cmd(client, message):
     if not is_sudo(message): return await message.reply(UNAUTH_MSG)
     text = (
@@ -81,10 +99,10 @@ async def settings_cmd(client, message):
 async def update_setting(message, key, display_name):
     if not is_sudo(message): return await message.reply(UNAUTH_MSG)
     if len(message.command) < 2: 
-        msg = await message.reply(f"Current {display_name}: `{config_data[key]}`")
+        msg = await message.reply(f"Current {display_name}: `{config_data.get(key)}`")
         return asyncio.create_task(auto_clean(msg, message))
     val = message.command[1]
-    if str(config_data[key]) == str(val): 
+    if str(config_data.get(key)) == str(val): 
         msg = await message.reply(f"⚠️ {display_name} is already set to `{val}`")
         return asyncio.create_task(auto_clean(msg, message))
     config_data[key] = val
@@ -92,29 +110,29 @@ async def update_setting(message, key, display_name):
     msg = await message.reply(f"✅ {display_name} successfully updated to `{val}`.")
     asyncio.create_task(auto_clean(msg, message))
 
-@bot_app.on_message(filters.command("preset", prefixes=["/", "!", "."]))
+@bot_app.on_message(filters.command("preset"))
 async def preset_cmd(client, message): await update_setting(message, "PRESET", "preset")
 
-@bot_app.on_message(filters.command("crf", prefixes=["/", "!", "."]))
+@bot_app.on_message(filters.command("crf"))
 async def crf_cmd(client, message): await update_setting(message, "CRF", "crf")
 
-@bot_app.on_message(filters.command("audio", prefixes=["/", "!", "."]))
+@bot_app.on_message(filters.command("audio"))
 async def audio_cmd(client, message): await update_setting(message, "AUDIO_BITRATE", "audio_bitrate")
 
-@bot_app.on_message(filters.command("resolution", prefixes=["/", "!", "."]))
+@bot_app.on_message(filters.command("resolution"))
 async def res_cmd(client, message): await update_setting(message, "RESOLUTION", "resolution")
 
-@bot_app.on_message(filters.command("codec", prefixes=["/", "!", "."]))
+@bot_app.on_message(filters.command("codec"))
 async def codec_cmd(client, message): await update_setting(message, "CODEC", "codec")
 
-@bot_app.on_message(filters.command("clear", prefixes=["/", "!", "."]))
+@bot_app.on_message(filters.command("clear"))
 async def clear_cmd(client, message):
     if not is_sudo(message): return await message.reply(UNAUTH_MSG)
     while not queue.empty(): queue.get_nowait(); queue.task_done()
     msg = await message.reply(Localisation.QUEUE_CLEARED)
     asyncio.create_task(auto_clean(msg, message))
 
-@bot_app.on_message(filters.command("cancel", prefixes=["/", "!", "."]))
+@bot_app.on_message(filters.command("cancel"))
 async def cancel_cmd(client, message):
     if not is_sudo(message): return await message.reply(UNAUTH_MSG)
     if AppState.task_state == TaskState.IDLE: 
@@ -124,7 +142,7 @@ async def cancel_cmd(client, message):
     msg = await message.reply(Localisation.CANCEL_PROMPT, reply_markup=btn, quote=True)
     asyncio.create_task(auto_clean(msg, message))
 
-@bot_app.on_message(filters.command("log", prefixes=["/", "!", "."]))
+@bot_app.on_message(filters.command("log"))
 async def log_cmd(client, message):
     if not is_sudo(message): return await message.reply(UNAUTH_MSG)
     msg = await message.reply("⏳ Fetching bot logs...")
@@ -136,7 +154,7 @@ async def log_cmd(client, message):
         await msg.edit(f"📝 **Bot Logs:**\n{link}")
     except Exception as e: await msg.edit(f"❌ Failed to fetch logs: {e}")
 
-@bot_app.on_message(filters.command("mediainfo", prefixes=["/", "!", "."]))
+@bot_app.on_message(filters.command("mediainfo"))
 async def mediainfo_cmd(client, message):
     if not is_sudo(message): return await message.reply(UNAUTH_MSG)
     if not message.reply_to_message or not getattr(message.reply_to_message, 'video', None) and not getattr(message.reply_to_message, 'document', None):
@@ -154,7 +172,7 @@ async def mediainfo_cmd(client, message):
         process = await asyncio.create_subprocess_exec(
             "mediainfo", real_path,
             stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
-            preexec_fn=os.setsid
+            start_new_session=True 
         )
         try:
             stdout, _ = await asyncio.wait_for(process.communicate(), timeout=30)
@@ -208,7 +226,7 @@ async def generate_sample_background(client, target_message, status_msg):
         process = await asyncio.create_subprocess_exec(
             "ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", file_path,
             stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
-            preexec_fn=os.setsid
+            start_new_session=True 
         )
         try:
             stdout, _ = await asyncio.wait_for(process.communicate(), timeout=30)
@@ -230,7 +248,7 @@ async def generate_sample_background(client, target_message, status_msg):
         sample_out = f"Sample_{uuid.uuid4().hex}.mkv"
         cut_cmd = ["ffmpeg", "-ss", str(start_time), "-i", file_path, "-t", "30", "-c", "copy", "-y", sample_out]
         
-        process = await asyncio.create_subprocess_exec(*cut_cmd, preexec_fn=os.setsid)
+        process = await asyncio.create_subprocess_exec(*cut_cmd, start_new_session=True)
         await process.communicate()
 
         if not os.path.exists(sample_out):
@@ -249,7 +267,7 @@ async def generate_sample_background(client, target_message, status_msg):
         if 'file_path' in locals() and os.path.exists(file_path): os.remove(file_path)
         if 'sample_out' in locals() and os.path.exists(sample_out): os.remove(sample_out)
 
-@bot_app.on_message(filters.command("samplegen", prefixes=["/", "!", "."]))
+@bot_app.on_message(filters.command("samplegen"))
 async def samplegen_cmd(client, message):
     if not is_sudo(message): return await message.reply(UNAUTH_MSG)
     if AppState.task_state != TaskState.IDLE or not queue.empty(): return await message.reply(Localisation.SAMPLE_BUSY)
@@ -265,7 +283,7 @@ async def samplegen_cmd(client, message):
     msg = await message.reply("⏳ **Initializing Random Sample Generator...**")
     asyncio.create_task(generate_sample_background(client, message.reply_to_message, msg))
 
-@bot_app.on_message(filters.command("clearlocals", prefixes=["/", "!", "."]))
+@bot_app.on_message(filters.command("clearlocals"))
 async def clearlocals_cmd(client, message):
     if not is_sudo(message): return await message.reply(UNAUTH_MSG)
     try:
@@ -274,14 +292,17 @@ async def clearlocals_cmd(client, message):
     except Exception as e:
         await message.reply(f"❌ **Failed to clear locals:** {e}")
 
-@bot_app.on_message(filters.command("restart", prefixes=["/", "!", "."]))
+@bot_app.on_message(filters.command("restart"))
 async def restart_cmd(client, message):
     if not is_sudo(message): return await message.reply(UNAUTH_MSG)
     msg = await message.reply("🔄 **Restarting the server now...**")
     with open("restart.json", "w") as f: json.dump({"chat_id": msg.chat.id, "message_id": msg.id}, f)
     os.execl(sys.executable, sys.executable, "-m", "bot")
 
-@bot_app.on_message(filters.command("cancelall", prefixes=["/", "!", "."]))
+# ==========================================
+# 👑 OWNER ONLY COMMANDS
+# ==========================================
+@bot_app.on_message(filters.command("cancelall"))
 async def cancel_all_cmd(client, message):
     if not is_owner(message): return await message.reply(UNAUTH_MSG)
     while not queue.empty(): queue.get_nowait(); queue.task_done()
@@ -290,7 +311,7 @@ async def cancel_all_cmd(client, message):
     msg = await message.reply("⚠️ **ALL TASKS CANCELLED AND QUEUE CLEARED.**")
     asyncio.create_task(auto_clean(msg, message))
 
-@bot_app.on_message(filters.command("setthumbnail", prefixes=["/", "!", "."]))
+@bot_app.on_message(filters.command("setthumbnail"))
 async def set_thumb(client, message):
     if not is_owner(message): return await message.reply(UNAUTH_MSG)
     if not message.reply_to_message or not message.reply_to_message.photo: return await message.reply(Localisation.INVALID_THUMB)
@@ -298,7 +319,7 @@ async def set_thumb(client, message):
     await message.reply_to_message.download(file_name=path)
     await message.reply(Localisation.THUMB_ADDED)
 
-@bot_app.on_message(filters.command("delthumbnail", prefixes=["/", "!", "."]))
+@bot_app.on_message(filters.command("delthumbnail"))
 async def del_thumb_cmd(client, message):
     if not is_owner(message): return await message.reply(UNAUTH_MSG)
     path = os.path.join(Config.THUMB_DIR, f"{message.from_user.id}.jpg")
@@ -309,7 +330,7 @@ async def del_thumb_cmd(client, message):
     msg = await message.reply(Localisation.THUMB_WARNING, reply_markup=btn)
     asyncio.create_task(auto_clean(msg, message))
 
-@bot_app.on_message(filters.command("speedtest", prefixes=["/", "!", "."]))
+@bot_app.on_message(filters.command("speedtest"))
 async def speedtest_cmd(client, message):
     if not is_owner(message): return await message.reply(UNAUTH_MSG)
     msg = await message.reply("⏳ **Running Server Speedtest...**\n✨ 𝘛𝘩𝘪𝘴 𝘵𝘢𝘬𝘦𝘴 𝘢𝘣𝘰𝘶𝘵 20 𝘴𝘦𝘤𝘰𝘯𝘥𝘴 ✨")
@@ -341,7 +362,7 @@ async def aexec(code, client, message):
     exec(f"async def __aexec(client, message): " + "".join(f"\n {l}" for l in code.split("\n")))
     return await locals()["__aexec"](client, message)
 
-@bot_app.on_message(filters.command(["eval", "exec"], prefixes=["/", "!", "."]))
+@bot_app.on_message(filters.command(["eval", "exec"]))
 async def eval_handler(client, message):
     if not is_owner(message): return await message.reply(UNAUTH_MSG)
     if len(message.text.split()) < 2: return
@@ -361,7 +382,7 @@ async def eval_handler(client, message):
         os.remove("eval.txt"); await msg.delete()
     else: await msg.edit(final_output)
 
-@bot_app.on_message(filters.command("broadcast", prefixes=["/", "!", "."]))
+@bot_app.on_message(filters.command("broadcast"))
 async def broadcast_cmd(client, message):
     if not is_owner(message): return await message.reply(UNAUTH_MSG)
     if len(message.command) < 2: return await message.reply("⚠️ Usage: `/broadcast Your message here`")
@@ -370,9 +391,10 @@ async def broadcast_cmd(client, message):
     success = 0
     failed = 0
     
-    await message.reply(f"📣 **Broadcasting to {len(config_data['AUTH_USERS'])} users...**")
+    auth_list = config_data.get('AUTH_USERS', [])
+    await message.reply(f"📣 **Broadcasting to {len(auth_list)} users...**")
     
-    for user_id in config_data['AUTH_USERS']:
+    for user_id in auth_list:
         try:
             await bot_app.send_message(user_id, f"📣 **Announcement from Admin:**\n\n{b_msg}")
             success += 1
@@ -382,34 +404,17 @@ async def broadcast_cmd(client, message):
     msg = await message.reply(f"✅ **Broadcast Complete!**\n\n🟢 **Success:** `{success}`\n🔴 **Failed:** `{failed}`")
     asyncio.create_task(auto_clean(msg, message))
 
-@bot_app.on_message(filters.command("bsetting", prefixes=["/", "!", "."]))
+@bot_app.on_message(filters.command("bsetting"))
 async def bsetting_cmd(client, message):
     if not is_owner(message): return await message.reply(UNAUTH_MSG)
-    
-    btn = InlineKeyboardMarkup([
-        [InlineKeyboardButton("API_ID", callback_data="bsetting_select_API_ID"),
-         InlineKeyboardButton("API_HASH", callback_data="bsetting_select_API_HASH")],
-        [InlineKeyboardButton("TG_BOT_TOKEN", callback_data="bsetting_select_TG_BOT_TOKEN"),
-         InlineKeyboardButton("OWNER_ID", callback_data="bsetting_select_OWNER_ID")],
-        [InlineKeyboardButton("LOG_CHANNEL", callback_data="bsetting_select_LOG_CHANNEL"),
-         InlineKeyboardButton("AUTH_USERS", callback_data="bsetting_select_AUTH_USERS")],
-        [InlineKeyboardButton("USER_SESSION_STRING", callback_data="bsetting_select_USER_SESSION_STRING")],
-        [InlineKeyboardButton("CRF", callback_data="bsetting_select_CRF"),
-         InlineKeyboardButton("PRESET", callback_data="bsetting_select_PRESET")],
-        [InlineKeyboardButton("RESOLUTION", callback_data="bsetting_select_RESOLUTION"),
-         InlineKeyboardButton("AUDIO_BITRATE", callback_data="bsetting_select_AUDIO_BITRATE")],
-        [InlineKeyboardButton("CODEC", callback_data="bsetting_select_CODEC"),
-         InlineKeyboardButton("WATERMARK", callback_data="bsetting_select_WATERMARK_TEXT")],
-        [InlineKeyboardButton("AS_DOCUMENT", callback_data="bsetting_toggle_AS_DOCUMENT")], 
-        [InlineKeyboardButton("❌ Close", callback_data="bsetting_close")]
-    ])
     
     help_text = (
         "**⚙️ Bot Settings Menu**\n"
         "Click a variable below to change its value interactively.\n"
         "✨ 𝘊𝘰𝘳𝘦 𝘴𝘺𝘴𝘵𝘦𝘮 𝘤𝘩𝘢𝘯𝘨𝘦𝘴 𝘳𝘦𝘲𝘶𝘪𝘳𝘦 𝘢 /𝘳𝘦𝘴𝘵𝘢𝘳𝘵 𝘵𝘰 𝘵𝘢𝘬𝘦 𝘧𝘶𝘭𝘭 𝘦𝘧𝘧𝘦𝘤𝘵 ✨"
     )
-    await message.reply(help_text, reply_markup=btn)
+    # FIX: Render the centralized menu directly.
+    await message.reply(help_text, reply_markup=get_bsetting_menu())
 
 @bot_app.on_message(filters.text & filters.private, group=1)
 async def bsetting_input_catcher(client, message):
