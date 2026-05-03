@@ -3,6 +3,7 @@ import sys
 import time
 import json
 import asyncio
+import httpx
 from pyrogram import idle
 from bot import bot_app, user_app, logger
 from bot.helper_funcs.utils import START_TIME, get_readable_time, AppState
@@ -13,9 +14,20 @@ import bot.plugins.call_back_button_handler
 import bot.plugins.incoming_message_fn
 import bot.plugins.status_message_fn
 
+async def fetch_default_thumbnail() -> None:
+    thumb_url = "https://telegra.ph/file/5c4635e173e7407694a63.jpg"
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(20), follow_redirects=True) as client:
+            resp = await client.get(thumb_url)
+            resp.raise_for_status()
+        with open("thumb.jpg", "wb") as f:
+            f.write(resp.content)
+        logger.info("Default universal thumbnail saved to thumb.jpg")
+    except Exception as e:
+        logger.warning("Default thumbnail download skipped: %s", e)
+
 async def main():
     try:
-        # FIX: Non-blocking process cleanup
         p1 = await asyncio.create_subprocess_exec("pkill", "-9", "-f", "ffmpeg", stderr=asyncio.subprocess.DEVNULL)
         await p1.wait()
         p2 = await asyncio.create_subprocess_exec("pkill", "-9", "-f", "ffprobe", stderr=asyncio.subprocess.DEVNULL)
@@ -24,9 +36,8 @@ async def main():
         pass
         
     try:
-        # FIX: Fetch the default thumbnail gracefully on boot
         logger.info("Fetching default universal thumbnail...")
-        os.system("wget -q https://telegra.ph/file/5c4635e173e7407694a63.jpg -O thumb.jpg")
+        await fetch_default_thumbnail()
 
         await bot_app.start()
         logger.info("Bot Username detected: @%s", bot_app.me.username)
@@ -53,7 +64,6 @@ async def main():
                     chat_id = data.get("chat_id")
                     msg_id = data.get("message_id")
                     if chat_id and msg_id:
-                        # FIX: Clean, custom restart message without Boot Time
                         await bot_app.edit_message_text(
                             chat_id, 
                             msg_id, 

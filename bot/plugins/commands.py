@@ -18,7 +18,7 @@ from bot.config import Config
 from bot.localisation import Localisation
 from bot.helper_funcs.utils import AppState, TaskState, queue, START_TIME, get_readable_time, send_log, get_file_info, kill_running_process
 from bot.helper_funcs.download import get_graph_link
-from bot.helper_funcs.display_progress import humanbytes
+from bot.helper_funcs.display_progress import humanbytes, make_bar, time_formatter, render_active_status, progress_bar
 from bot.plugins.call_back_button_handler import get_bsetting_menu
 
 UNAUTH_MSG = "<b>You are not allowed to do that 🤭</b>"
@@ -197,17 +197,66 @@ async def mediainfo_cmd(client, message):
         if real_path and os.path.exists(real_path): os.remove(real_path)
 
 async def generate_sample_background(client, target_message, status_msg):
+    file_path = None
+    sample_out = None
+    
+    actual_thumb = None
+    user_id = target_message.from_user.id if target_message.from_user else 0
+    custom_thumb = os.path.join(Config.THUMB_DIR, f"{user_id}.jpg")
+    
+    if os.path.exists(custom_thumb):
+        actual_thumb = custom_thumb
+    
+    AppState.task_state = TaskState.SAMPLEGEN
+    AppState.active_file_name = getattr(target_message.video or target_message.document, 'file_name', 'sample_source')
+    AppState.status_snapshot = Localisation.DOWNLOAD_START
+    
     try:
-        await status_msg.edit(Localisation.DOWNLOAD_START)
         active_client = user_app if user_app else bot_app
-        file_path = await active_client.download_media(target_message)
-        if not file_path or not os.path.exists(file_path): return await status_msg.edit(Localisation.FILE_NOT_FOUND)
+        
+        dl_start = time.time()
+        last_dl_update = [time.time() - 6]   
+        
+        async def dl_progress(current, total):
+            now = time.time()
+            if (now - last_dl_update[0]) < 5 and current < total:
+                return
+            last_dl_update[0] = now
+            
+            percent  = (current / total * 100) if total > 0 else 0
+            elapsed  = now - dl_start
+            speed    = current / elapsed if elapsed > 0 else 0
+            eta_s    = (total - current) / speed if speed > 0 else 0
+            
+            done_str  = humanbytes(current)
+            total_str = humanbytes(total)
+            speed_str = humanbytes(speed)
+            eta_str   = time_formatter(eta_s * 1000)
+            el_str    = time_formatter(elapsed * 1000)
+            
+            AppState.status_snapshot = render_active_status(
+                percent, done_str, total_str, eta_str, speed_str, el_str
+            )
+            
+            text = (
+                f"✂️ **Sample Generator — Downloading...**\n\n"
+                f"[{make_bar(percent)}] {percent:.1f}%\n"
+                f"📦 **{done_str}** of **{total_str}**\n"
+                f"⚡️ {speed_str}/s | ⏱️ ETA: {eta_str}"
+            )
+            try: await status_msg.edit(text)
+            except Exception: pass
+            
+        file_path = await active_client.download_media(target_message, progress=dl_progress)
+        
+        if not file_path or not os.path.exists(file_path): 
+            return await status_msg.edit(Localisation.FILE_NOT_FOUND)
 
-        await status_msg.edit(Localisation.SAMPLE_GENERATING)
+        await status_msg.edit("✂️ **Probing video duration...**")
         
         process = await asyncio.create_subprocess_exec(
             "ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", file_path,
-            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL,
             start_new_session=True 
         )
         try: stdout, _ = await asyncio.wait_for(process.communicate(), timeout=30)
@@ -224,26 +273,59 @@ async def generate_sample_background(client, target_message, status_msg):
             os.remove(file_path)
             return await status_msg.edit("⚠️ Video is too short to generate a 30-second sample.")
 
-        start_time = random.uniform(10, total_duration - 35)
+        start_time_cut = random.uniform(10, total_duration - 35)
         sample_out = f"Sample_{uuid.uuid4().hex}.mkv"
-        cut_cmd = ["ffmpeg", "-ss", str(start_time), "-i", file_path, "-t", "30", "-c", "copy", "-y", sample_out]
+        await status_msg.edit(Localisation.SAMPLE_GENERATING)
         
-        process = await asyncio.create_subprocess_exec(*cut_cmd, start_new_session=True)
-        await process.communicate()
+        cut_cmd = [
+            "ffmpeg", "-hide_banner", "-loglevel", "quiet", "-nostats", 
+            "-ss", str(start_time_cut), "-i", file_path, "-t", "30", "-c", "copy", "-y", sample_out
+        ]
+        
+        process = await asyncio.create_subprocess_exec(
+            *cut_cmd, 
+            stdout=asyncio.subprocess.DEVNULL, 
+            stderr=asyncio.subprocess.DEVNULL, 
+            start_new_session=True
+        )
+        try:
+            await asyncio.wait_for(process.communicate(), timeout=120)
+        except asyncio.TimeoutError:
+            try: os.killpg(os.getpgid(process.pid), signal.SIGKILL)
+            except: pass
+            return await status_msg.edit("⚠️ Sample cut timed out. Try a shorter source file.")
 
         if not os.path.exists(sample_out):
             os.remove(file_path)
             return await status_msg.edit("⚠️ Failed to generate sample.")
 
-        await status_msg.edit(Localisation.UPLOAD_START)
-        caption = f"🎞 **Random 30s Sample**\n⏱ Cut from: `{time.strftime('%H:%M:%S', time.gmtime(start_time))}`\n\n<b>©ᴇɴᴄᴏᴅᴇᴅ Bʏ:</b> <b>@{AppState.bot_username}</b>"
-        await active_client.send_document(chat_id=status_msg.chat.id, document=sample_out, caption=caption, force_document=True, reply_to_message_id=target_message.id)
-        await status_msg.delete()
-        os.remove(file_path); os.remove(sample_out)
+        await status_msg.edit("📤 **Uploading Sample...**")
+        caption = f"🎞 **Random 30s Sample**\n⏱ Cut from: `{time.strftime('%H:%M:%S', time.gmtime(start_time_cut))}`\n\n<b>©ᴇɴᴄᴏᴅᴇᴅ Bʏ:</b> <b>@{AppState.bot_username}</b>"
+        
+        await active_client.send_video(
+            chat_id=status_msg.chat.id, 
+            video=sample_out, 
+            caption=caption, 
+            thumb=actual_thumb,
+            supports_streaming=True,
+            reply_to_message_id=target_message.id
+        )
+        try: await status_msg.delete()
+        except: pass
     except Exception as e:
-        await status_msg.edit(f"❌ Sample Generation Error: {e}")
-        if 'file_path' in locals() and os.path.exists(file_path): os.remove(file_path)
-        if 'sample_out' in locals() and os.path.exists(sample_out): os.remove(sample_out)
+        try: await status_msg.edit(f"❌ Sample Generation Error: {e}")
+        except: pass
+    finally:
+        if file_path and os.path.exists(file_path): 
+            try: os.remove(file_path)
+            except: pass
+        if sample_out and os.path.exists(sample_out): 
+            try: os.remove(sample_out)
+            except: pass
+        
+        AppState.task_state = TaskState.IDLE
+        AppState.active_file_name = "None"
+        AppState.status_snapshot = ""
 
 @bot_app.on_message(filters.command("samplegen"))
 async def samplegen_cmd(client, message):

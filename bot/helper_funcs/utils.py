@@ -3,8 +3,7 @@ import time
 import os
 import signal
 from datetime import datetime, timezone, timedelta
-from pyrogram.file_id import FileId 
-# FIX: Native bot import
+from pyrogram.file_id import FileId
 from bot import bot_app, logger, config_data
 
 queue = asyncio.Queue()
@@ -17,33 +16,29 @@ class TaskState:
     ENCODING = "Encoding"
     UPLOADING = "Uploading"
     CANCELLING = "Cancelling"
+    SAMPLEGEN = "Generating Sample"
 
 class AppState:
     current_process = None
     process_lock = asyncio.Lock()
-    
     cancel_task = False
     cancelling = False
-    
     task_state = TaskState.IDLE
     active_file_name = "None"
     active_origin_msg = None
-    
     main_progress_text = ""
     status_snapshot = ""
-    
     pending_tasks = {}
     awaiting_index = {}
-    bot_username = "Bot" 
-    bsetting_state = {}  
-    is_premium = False 
+    bot_username = "Bot"
+    bsetting_state = {}
+    is_premium = False
 
 async def kill_running_process():
     async with AppState.process_lock:
         proc = AppState.current_process
         if not proc: return
         if AppState.cancelling: return
-        
         AppState.cancelling = True
         try:
             try:
@@ -100,7 +95,6 @@ def get_network_io():
 def get_file_info(message):
     media = message.video or message.document
     if not media: return "Unknown", "Unknown"
-    
     size_bytes = media.file_size
     if not size_bytes: size_str = "0 B"
     else:
@@ -109,12 +103,10 @@ def get_file_info(message):
                 size_str = f"{size_bytes:.2f} {unit}"
                 break
             size_bytes /= 1024
-            
     try:
         file_id_obj = FileId.decode(media.file_id)
         dc_id = file_id_obj.dc_id
         dc_map = {1: "Miami, USA - DC1", 2: "Amsterdam, NL - DC2", 3: "Miami, USA - DC3", 4: "Amsterdam, NL - DC4", 5: "Singapore, SG - DC5"}
         dc_str = dc_map.get(dc_id, f"DC{dc_id}")
     except: dc_str = "Unknown DC"
-        
     return size_str, dc_str

@@ -1,12 +1,14 @@
 import time
 import json
 import asyncio
+import psutil
 from pyrogram import filters
 from bot import bot_app, config_data
 from bot.helper_funcs.utils import AppState, TaskState, queue, get_sys_stats, get_network_io, get_readable_time, START_TIME
 from bot.helper_funcs.display_progress import humanbytes
 
-# FIX: Claude's Logic - Restored chat_id check for Supergroup functionality & used safe parsing.
+UNAUTH_MSG = "<b>You are not allowed to do that 🤭</b>"
+
 def is_sudo(message):
     user_id = message.from_user.id if message.from_user else 0
     chat_id = message.chat.id
@@ -19,17 +21,21 @@ def is_sudo(message):
         
     return user_id in auth_users or user_id == owner_id or chat_id in auth_users
 
-# FIX: DeepSeek's Logic - Removed the buggy prefixes list to ensure the command always fires.
 @bot_app.on_message(filters.command("status"))
 async def status_cmd(client, message):
-    if not is_sudo(message): return
+    if not is_sudo(message): 
+        return await message.reply(UNAUTH_MSG)
     
-    if AppState.task_state != TaskState.IDLE and AppState.status_snapshot:
-        text = AppState.status_snapshot
+    # FIX: Ensure active task states render properly even if snapshot lags slightly
+    if AppState.task_state != TaskState.IDLE:
+        text = AppState.status_snapshot or (
+            f"**🌐 Bᴏᴛ Sᴛᴀᴛɪsᴛɪᴄs 🌐**\n\n"
+            f"**Status:** {AppState.task_state}\n\n"
+            f"**📥 Files in Queue:** {queue.qsize()}"
+        )
     else:
         cpu, mem, disk = get_sys_stats()
         sent, recv = get_network_io()
-        import psutil
         free_disk_gb = round(psutil.disk_usage('/').free / (1024**3), 2)
         uptime_str = get_readable_time((time.time() - START_TIME)*1000)
         

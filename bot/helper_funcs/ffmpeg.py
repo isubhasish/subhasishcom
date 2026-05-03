@@ -39,9 +39,17 @@ async def abort_current_task(status_msg, file_path=None, out=None):
 
 async def take_screen_shot(video_file, output_directory, ttl):
     out_put_file_name = os.path.join(output_directory, f"{time.time()}_thumb.jpg")
-    file_genertor_command = ["ffmpeg", "-ss", str(ttl), "-i", video_file, "-vframes", "1", out_put_file_name]
+    file_genertor_command = [
+        "ffmpeg", "-hide_banner", "-loglevel", "quiet",
+        "-ss", str(ttl), "-i", video_file, "-vframes", "1", out_put_file_name
+    ]
     try:
-        process = await asyncio.create_subprocess_exec(*file_genertor_command, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE, start_new_session=True)
+        process = await asyncio.create_subprocess_exec(
+            *file_genertor_command, 
+            stdout=asyncio.subprocess.DEVNULL, 
+            stderr=asyncio.subprocess.DEVNULL, 
+            start_new_session=True
+        )
         await process.communicate()
         if os.path.lexists(out_put_file_name): return out_put_file_name
     except Exception as e: logger.error(f"Failed to generate auto-thumbnail: {e}")
@@ -69,7 +77,6 @@ async def worker():
         out = None
         actual_thumb = None 
         
-        # FIX: Check for user custom thumb first, then fallback to the repo's default thumb.jpg
         custom_thumb = os.path.join(Config.THUMB_DIR, f"{msg.from_user.id}.jpg")
         default_thumb = "thumb.jpg"
         
@@ -95,6 +102,7 @@ async def worker():
                 continue
 
             AppState.task_state = TaskState.ENCODING
+            AppState.status_snapshot = Localisation.COMPRESS_START
             dl_time = int(time.time() - start_time)
             await status_msg.edit(Localisation.DOWNLOADED_SUCCESS.format(time_formatter(dl_time * 1000)))
             await send_log(f"**Download Stopped, Bot is Free Now !!** \n\nProcess Done at {get_ist()}")
@@ -125,26 +133,44 @@ async def worker():
             except Exception:
                 crf_val = "28"
             
-            cmd = ["ffmpeg", "-i", file_path] + map_args + [
+            duration_sec = getattr(msg.video, 'duration', 0) if msg.video else 0
+            if not duration_sec:
+                try:
+                    probe = await asyncio.create_subprocess_exec(
+                        "ffprobe", "-v", "quiet", "-show_entries", "format=duration",
+                        "-of", "default=noprint_wrappers=1:nokey=1", file_path,
+                        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL, start_new_session=True
+                    )
+                    probe_stdout, _ = await asyncio.wait_for(probe.communicate(), timeout=30)
+                    duration_sec = int(float(probe_stdout.decode().strip()))
+                except Exception:
+                    duration_sec = 0
+
+            cmd = [
+                "ffmpeg", "-hide_banner", "-loglevel", "error", "-nostats", "-i", file_path
+            ] + map_args + [
                 "-c:v", str(config_data.get("CODEC", "libx265")), 
                 "-crf", crf_val, 
                 "-preset", str(config_data.get("PRESET", "fast")),
                 "-vf", vf_string, 
                 "-c:a", "libopus", 
                 "-b:a", str(config_data.get("AUDIO_BITRATE", "96k")), 
+                "-progress", "pipe:1",
                 "-y", out
             ]
             
-            duration_sec = getattr(msg.video, 'duration', 0) if msg.video else 0
             encode_start_time = time.time()
             
             try:
-                process = await asyncio.create_subprocess_exec(*cmd, stderr=asyncio.subprocess.PIPE, start_new_session=True)
+                process = await asyncio.create_subprocess_exec(
+                    *cmd, 
+                    stdout=asyncio.subprocess.PIPE, 
+                    stderr=asyncio.subprocess.DEVNULL, 
+                    start_new_session=True
+                )
                 async with AppState.process_lock:
                     AppState.current_process = process
-                last_update_time = time.time()
-                
-                # FIX: Applied bold/emoji layout to the button directly on the compressing message
+                last_update_time = time.time() - 10 
                 btn = InlineKeyboardMarkup([[InlineKeyboardButton("🛑 Cancel Task", callback_data="cancel_running")]])
 
                 while True:
@@ -152,45 +178,45 @@ async def worker():
                         await kill_running_process()
                         raise asyncio.CancelledError("Task Cancelled by User")
 
-                    line_bytes = await safe_readline(process.stderr)
+                    line_bytes = await safe_readline(process.stdout)
                     
                     if line_bytes is None:
+                        if process.returncode is not None: break
                         continue 
                     if line_bytes == b"":
                         break    
 
                     line_str = line_bytes.decode('utf-8', errors='ignore').strip()
-                    
-                    if line_str:
-                        # FIX: Make the duration extraction highly aggressive so we don't get stuck at 0s
-                        if not duration_sec and "Duration:" in line_str:
-                            match = re.search(r"Duration:\s*(\d+):(\d+):(\d+)", line_str)
-                            if match: duration_sec = int(match.group(1))*3600 + int(match.group(2))*60 + int(match.group(3))
+                    if not line_str: continue
 
-                        # FIX: More robust time check to guarantee the UI updates
-                        time_match = re.search(r"time=\s*(\d+):(\d+):(\d+)", line_str)
-                        if time_match and (time.time() - last_update_time > 8):
-                            curr_sec = int(time_match.group(1))*3600 + int(time_match.group(2))*60 + int(time_match.group(3))
-                            
-                            # Safely prevent division by zero, but STILL force UI update
-                            safe_duration = duration_sec if duration_sec > 0 else (curr_sec + 1)
-                            
-                            percent = (curr_sec / safe_duration) * 100
-                            elapsed = time.time() - encode_start_time
+                    if line_str.startswith("out_time_ms="):
+                        try:
+                            out_time_ms = int(line_str.split("=", 1)[1])
+                        except ValueError:
+                            continue
+
+                        if time.time() - last_update_time > 4:
+                            curr_sec = out_time_ms / 1_000_000
+                            safe_duration = duration_sec if duration_sec > 0 else max(curr_sec + 1, 1)
+
+                            percent = min((curr_sec / safe_duration) * 100, 100.0)
+                            elapsed = max(time.time() - encode_start_time, 0.001)
                             speed = curr_sec / elapsed if elapsed > 0 else 0
                             eta = (safe_duration - curr_sec) / speed if speed > 0 else 0
-                            
+
                             cpu, mem, disk = get_sys_stats()
-                            est_total_bytes = os.path.getsize(file_path) * 0.4 
-                            current_bytes = (percent/100) * est_total_bytes
-                            
+                            est_total_bytes = max(os.path.getsize(file_path) * 0.4, 1)
+                            current_bytes = (percent / 100) * est_total_bytes
+
                             done_str = humanbytes(current_bytes)
                             total_str = humanbytes(est_total_bytes)
                             speed_str = humanbytes(speed)
-                            eta_str = time_formatter(eta*1000)
-                            elapsed_str = time_formatter(elapsed*1000)
+                            eta_str = time_formatter(eta * 1000)
+                            elapsed_str = time_formatter(elapsed * 1000)
 
-                            AppState.status_snapshot = render_active_status(percent, done_str, total_str, eta_str, speed_str, elapsed_str)
+                            AppState.status_snapshot = render_active_status(
+                                percent, done_str, total_str, eta_str, speed_str, elapsed_str
+                            )
 
                             text = (
                                 f"ℹ️ **ɴᴏᴡ:** 💡 ENCODING...💡\n\n"
@@ -201,7 +227,7 @@ async def worker():
                                 f"📦 **sɪᴢᴇ:** {done_str} of {total_str}\n\n"
                                 f"🖥 CPU: {cpu}% | 💽 RAM: {mem}%"
                             )
-                            
+
                             try:
                                 await status_msg.edit(text, reply_markup=btn)
                                 last_update_time = time.time()
@@ -210,7 +236,8 @@ async def worker():
                 await process.wait()
                 async with AppState.process_lock:
                     if AppState.current_process == process: AppState.current_process = None
-                if process.returncode != 0: raise asyncio.CancelledError("FFmpeg failed or cancelled")
+                if process.returncode != 0 and not AppState.cancel_task: 
+                    raise asyncio.CancelledError("FFmpeg failed or cancelled")
                     
             except Exception as e:
                 if AppState.cancel_task or isinstance(e, asyncio.CancelledError):
@@ -245,15 +272,23 @@ async def worker():
                     st_m, st_s = divmod(st_rem, 60)
                     split_time = f"{st_h:02d}:{st_m:02d}:{st_s:02d}"
 
-                split_cmd = ["ffmpeg", "-i", out, "-c", "copy", "-f", "segment", "-segment_time", split_time, "-reset_timestamps", "1", f"{base_name}_part%03d{ext}"]
-                s_proc = await asyncio.create_subprocess_exec(*split_cmd, start_new_session=True)
+                split_cmd = [
+                    "ffmpeg", "-hide_banner", "-loglevel", "error", "-nostats",
+                    "-i", out, "-c", "copy", "-f", "segment", "-segment_time", split_time, 
+                    "-reset_timestamps", "1", f"{base_name}_part%03d{ext}"
+                ]
+                s_proc = await asyncio.create_subprocess_exec(
+                    *split_cmd, 
+                    stdout=asyncio.subprocess.DEVNULL, 
+                    stderr=asyncio.subprocess.DEVNULL, 
+                    start_new_session=True
+                )
                 await s_proc.communicate()
                 files_to_upload = sorted([f for f in os.listdir(".") if f.startswith(base_name + "_part") and f.endswith(ext)])
                 os.remove(out) 
 
             await send_log(f"**Uploading Video ...** \n\nProcess Started at {get_ist()}")
 
-            # FIX: Execute thumbnail fallback logic correctly
             if os.path.exists(custom_thumb):
                 actual_thumb = custom_thumb
             elif os.path.exists(default_thumb):
@@ -323,7 +358,6 @@ async def worker():
         finally: 
             await kill_running_process()
             if file_path and os.path.exists(file_path): os.remove(file_path)
-            # FIX: Make sure we don't delete the default thumb or the custom thumb from disk!
             if actual_thumb and actual_thumb != custom_thumb and actual_thumb != default_thumb and os.path.exists(actual_thumb): 
                 os.remove(actual_thumb)
             
