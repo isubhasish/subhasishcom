@@ -1,12 +1,10 @@
 FROM python:3.10-slim-bookworm
 
 ENV DEBIAN_FRONTEND=noninteractive
+ENV DEBCONF_NOWARNINGS=yes
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     apt-utils \
-    && rm -rf /var/lib/apt/lists/*
-
-RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
     mediainfo \
     tini \

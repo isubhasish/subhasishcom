@@ -26,7 +26,6 @@ async def status_cmd(client, message):
     if not is_sudo(message): 
         return await message.reply(UNAUTH_MSG)
     
-    # FIX: Ensure active task states render properly even if snapshot lags slightly
     if AppState.task_state != TaskState.IDLE:
         text = AppState.status_snapshot or (
             f"**🌐 Bᴏᴛ Sᴛᴀᴛɪsᴛɪᴄs 🌐**\n\n"
@@ -47,7 +46,7 @@ async def status_cmd(client, message):
             f"**CPU:** {cpu}% | **Free:** {free_disk_gb}GB ({100-disk}%)\n"
             f"**In:** {humanbytes(recv)} | **Out:** {humanbytes(sent)}\n"
             f"**Ram:** {mem}% | **Uptime:** {uptime_str}\n\n"
-            f"**🏷Maintained By: @Subhasish_bot**"
+            f"**🏷Maintained By: @{AppState.bot_username}**"
         )
     
     msg = await message.reply(text)

@@ -14,6 +14,13 @@ import bot.plugins.call_back_button_handler
 import bot.plugins.incoming_message_fn
 import bot.plugins.status_message_fn
 
+# Prime CPU tracker at boot to prevent 0.0% reading
+try:
+    import psutil
+    psutil.cpu_percent()
+except Exception:
+    pass
+
 async def fetch_default_thumbnail() -> None:
     thumb_url = "https://telegra.ph/file/5c4635e173e7407694a63.jpg"
     try:

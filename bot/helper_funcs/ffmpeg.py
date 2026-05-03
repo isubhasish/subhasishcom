@@ -3,12 +3,13 @@ import asyncio
 import time
 import re
 import traceback
+import signal
 from datetime import datetime, timezone, timedelta
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from bot import bot_app, user_app, logger, config_data
 from bot.config import Config
 from bot.localisation import Localisation
-from bot.helper_funcs.utils import queue, AppState, TaskState, get_ist, send_log, get_sys_stats, get_file_info, kill_running_process, get_readable_time, START_TIME
+from bot.helper_funcs.utils import queue, AppState, TaskState, get_ist, send_log, get_sys_stats, get_file_info, kill_running_process, get_readable_time, START_TIME, delete_message_later
 from bot.helper_funcs.display_progress import progress_bar, humanbytes, time_formatter, make_bar, render_active_status
 
 async def safe_readline(stream, timeout=10):
@@ -17,25 +18,35 @@ async def safe_readline(stream, timeout=10):
     except asyncio.TimeoutError:
         return None  
 
-async def abort_current_task(status_msg, file_path=None, out=None):
+async def abort_current_task(status_msg=None, file_path=None, out=None, chat_id=None):
     await kill_running_process()
     for p in [file_path, out]:
         try:
             if p and os.path.exists(p): os.remove(p)
         except: pass
         
+    target_msg = status_msg or AppState.active_status_msg
     try:
-        await status_msg.edit("🛑 **Task Cancelled. Moving to next in queue...**")
+        if target_msg: await target_msg.delete()
     except: pass
     
     try:
-        if AppState.active_origin_msg:
-            await bot_app.send_message(
-                status_msg.chat.id,
-                "❌ **Task Cancelled.**",
+        if chat_id and AppState.active_origin_msg:
+            done_msg = await bot_app.send_message(
+                chat_id,
+                "🛑 **Task Cancelled.**",
                 reply_to_message_id=AppState.active_origin_msg.id
             )
+            asyncio.create_task(delete_message_later(done_msg, 10))
     except: pass
+
+    AppState.task_state = TaskState.IDLE
+    AppState.cancel_task = False
+    AppState.active_file_name = "None"
+    AppState.active_origin_msg = None
+    AppState.active_status_msg = None
+    AppState.status_snapshot = ""
+    AppState.task_kind = "compress"
 
 async def take_screen_shot(video_file, output_directory, ttl):
     out_put_file_name = os.path.join(output_directory, f"{time.time()}_thumb.jpg")
@@ -65,10 +76,13 @@ async def worker():
             continue
             
         msg, name, map_args, status_msg = task
+        chat_id_target = msg.chat.id
         
         AppState.task_state = TaskState.DOWNLOADING
         AppState.active_file_name = name
         AppState.active_origin_msg = msg
+        AppState.active_status_msg = status_msg
+        AppState.task_kind = "compress"
         AppState.cancel_task = False 
         
         start_time = time.time()
@@ -93,7 +107,7 @@ async def worker():
                 else: raise e
                 
             if download_cancelled or AppState.cancel_task:
-                await abort_current_task(status_msg, file_path)
+                await abort_current_task(status_msg, file_path, chat_id=chat_id_target)
                 continue
                 
             if not file_path or not os.path.exists(file_path):
@@ -109,7 +123,7 @@ async def worker():
             await asyncio.sleep(2.5) 
             
             if AppState.cancel_task:
-                await abort_current_task(status_msg, file_path)
+                await abort_current_task(status_msg, file_path, chat_id=chat_id_target)
                 continue
             
             base = name.replace(" ", ".").rsplit(".", 1)[0]
@@ -204,7 +218,7 @@ async def worker():
                             speed = curr_sec / elapsed if elapsed > 0 else 0
                             eta = (safe_duration - curr_sec) / speed if speed > 0 else 0
 
-                            cpu, mem, disk = get_sys_stats()
+                            cpu, mem, _ = get_sys_stats()
                             est_total_bytes = max(os.path.getsize(file_path) * 0.4, 1)
                             current_bytes = (percent / 100) * est_total_bytes
 
@@ -218,6 +232,7 @@ async def worker():
                                 percent, done_str, total_str, eta_str, speed_str, elapsed_str
                             )
 
+                            # FIX: Restored exact visual layout and spacing requested
                             text = (
                                 f"ℹ️ **ɴᴏᴡ:** 💡 ENCODING...💡\n\n"
                                 f"⏱️ **ᴇᴛᴀ:** {eta_str}\n\n"
@@ -233,15 +248,25 @@ async def worker():
                                 last_update_time = time.time()
                             except: pass
 
-                await process.wait()
+                try:
+                    await asyncio.wait_for(process.wait(), timeout=30)
+                except asyncio.TimeoutError:
+                    try: 
+                        os.killpg(os.getpgid(process.pid), signal.SIGKILL)
+                        await process.wait()
+                    except: pass
+                    
                 async with AppState.process_lock:
                     if AppState.current_process == process: AppState.current_process = None
                 if process.returncode != 0 and not AppState.cancel_task: 
                     raise asyncio.CancelledError("FFmpeg failed or cancelled")
                     
+            except asyncio.CancelledError:
+                await abort_current_task(status_msg, file_path, out, chat_id=chat_id_target)
+                continue
             except Exception as e:
-                if AppState.cancel_task or isinstance(e, asyncio.CancelledError):
-                    await abort_current_task(status_msg, file_path, out)
+                if AppState.cancel_task:
+                    await abort_current_task(status_msg, file_path, out, chat_id=chat_id_target)
                     continue
                 else:
                     await status_msg.edit(Localisation.COMPRESS_FAILED)
@@ -251,7 +276,7 @@ async def worker():
                     continue
             
             if AppState.cancel_task:
-                await abort_current_task(status_msg, file_path, out)
+                await abort_current_task(status_msg, file_path, out, chat_id=chat_id_target)
                 continue
 
             AppState.task_state = TaskState.UPLOADING
@@ -334,10 +359,13 @@ async def worker():
                         if len(files_to_upload) > 1: updated_caption = f"**[Part {idx+1}/{len(files_to_upload)}]**\n" + updated_caption
                         await uploaded_msg.edit_caption(updated_caption)
 
+                except asyncio.CancelledError:
+                    upload_aborted = True
+                    await abort_current_task(status_msg, upload_file, chat_id=chat_id_target)
                 except Exception as e:
-                    if AppState.cancel_task or isinstance(e, asyncio.CancelledError) or "Cancelled" in str(e) or "400" in str(e):
+                    if AppState.cancel_task or "Cancelled" in str(e) or "400" in str(e):
                         upload_aborted = True
-                        await abort_current_task(status_msg, upload_file)
+                        await abort_current_task(status_msg, upload_file, chat_id=chat_id_target)
                     else:
                         await status_msg.edit(Localisation.UPLOAD_FAILED)
                         await send_log(f"**Upload Stopped, Bot is Free Now !!** \n\nProcess Done at {get_ist()}\nError: {e}")
@@ -361,10 +389,13 @@ async def worker():
             if actual_thumb and actual_thumb != custom_thumb and actual_thumb != default_thumb and os.path.exists(actual_thumb): 
                 os.remove(actual_thumb)
             
+            AppState.task_state = TaskState.IDLE
             AppState.cancel_task = False
             AppState.active_file_name = "None"
             AppState.active_origin_msg = None
+            AppState.active_status_msg = None
             AppState.status_snapshot = ""
+            AppState.task_kind = "compress"
             if queue.empty(): AppState.task_state = TaskState.IDLE
             
             queue.task_done()

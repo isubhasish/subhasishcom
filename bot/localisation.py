@@ -46,4 +46,7 @@ class Localisation:
     
     # --- SAMPLE GEN TEXTS ---
     SAMPLE_BUSY = "⚠️ **Bot is Busy!**\nCannot generate a sample while a compression task is running or in queue."
-    SAMPLE_GENERATING = "✂️ **Generating Random 30-Second Sample...**\n✨ 𝘛𝘩𝘪𝘴 𝘸𝘪𝘭𝘭 𝘵𝘢𝘬𝘦 𝘢 𝘮𝘰𝘮𝘦𝘯𝘵 𝘥𝘦𝘱𝘦𝘯𝘥𝘪𝘯𝘨 𝘰𝘯 𝘧𝘪𝘭𝘦 𝘴𝘪𝘻𝘦 ✨"
+    SAMPLE_DOWNLOADING = "ℹ️ **sᴛᴀᴛᴜs:** 📥 Downloading ... 📥"
+    SAMPLE_PROBING = "📼 **Generating Video Duration...** 📼"
+    SAMPLE_CUTTING = "⏳ **Generating Sample...**⏳"
+    SAMPLE_UPLOADING = "ℹ️ **sᴛᴀᴛᴜs:** 📤 Uploading ... 📤"

@@ -26,6 +26,8 @@ class AppState:
     task_state = TaskState.IDLE
     active_file_name = "None"
     active_origin_msg = None
+    active_status_msg = None # FIX: Global UI tracking
+    task_kind = "compress"   # FIX: Distinguish compress vs sample
     main_progress_text = ""
     status_snapshot = ""
     pending_tasks = {}
@@ -53,18 +55,20 @@ async def kill_running_process():
             AppState.current_process = None
             AppState.cancelling = False
 
+async def delete_message_later(message, delay=10):
+    await asyncio.sleep(delay)
+    try: await message.delete()
+    except: pass
+
 def get_readable_time(milliseconds: int) -> str:
-    seconds, milliseconds = divmod(int(milliseconds), 1000)
+    seconds = int(milliseconds // 1000)
     minutes, seconds = divmod(seconds, 60)
     hours, minutes = divmod(minutes, 60)
     days, hours = divmod(hours, 24)
-    tmp = (
-        ((str(days) + "d, ") if days else "")
-        + ((str(hours) + "h, ") if hours else "")
-        + ((str(minutes) + "m, ") if minutes else "")
-        + ((str(seconds) + "s") if seconds else "")
-    )
-    return tmp
+
+    if days: return f"{days}d{hours:02d}h{minutes:02d}m{seconds:02d}s"
+    if hours: return f"{hours:02d}h{minutes:02d}m{seconds:02d}s"
+    return f"{minutes:02d}m{seconds:02d}s"
 
 def get_ist():
     tz = timezone(timedelta(hours=5, minutes=30))
@@ -73,14 +77,12 @@ def get_ist():
 async def send_log(msg_text: str):
     log_channel = config_data.get("LOG_CHANNEL")
     if log_channel:
-        try:
-            await bot_app.send_message(log_channel, msg_text)
-        except Exception as e:
-            logger.error(f"Failed to send log: {e}")
+        try: await bot_app.send_message(log_channel, msg_text)
+        except Exception as e: logger.error(f"Failed to send log: {e}")
 
 def get_sys_stats():
     import psutil
-    cpu = psutil.cpu_percent()
+    cpu = psutil.cpu_percent(interval=0.1) # FIX: Guaranteed non-zero reading
     mem = psutil.virtual_memory().percent
     disk = psutil.disk_usage('/').percent
     return cpu, mem, disk
