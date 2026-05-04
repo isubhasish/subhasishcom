@@ -2,6 +2,7 @@ import asyncio
 import time
 import os
 import signal
+import psutil
 from datetime import datetime, timezone, timedelta
 from pyrogram.file_id import FileId
 from bot import bot_app, logger, config_data
@@ -26,8 +27,8 @@ class AppState:
     task_state = TaskState.IDLE
     active_file_name = "None"
     active_origin_msg = None
-    active_status_msg = None # FIX: Global UI tracking
-    task_kind = "compress"   # FIX: Distinguish compress vs sample
+    active_status_msg = None
+    task_kind = "compress"
     main_progress_text = ""
     status_snapshot = ""
     pending_tasks = {}
@@ -35,6 +36,21 @@ class AppState:
     bot_username = "Bot"
     bsetting_state = {}
     is_premium = False
+
+_cpu_cache: float = 0.0
+
+async def cpu_monitor():
+    global _cpu_cache
+    psutil.cpu_percent()
+    await asyncio.sleep(0.5)
+
+    while True:
+        try:
+            val = await asyncio.to_thread(psutil.cpu_percent, 0.5)
+            _cpu_cache = val
+        except Exception:
+            pass
+        await asyncio.sleep(1.5)
 
 async def kill_running_process():
     async with AppState.process_lock:
@@ -81,14 +97,12 @@ async def send_log(msg_text: str):
         except Exception as e: logger.error(f"Failed to send log: {e}")
 
 def get_sys_stats():
-    import psutil
-    cpu = psutil.cpu_percent(interval=0.1) # FIX: Guaranteed non-zero reading
-    mem = psutil.virtual_memory().percent
+    cpu  = _cpu_cache                           
+    mem  = psutil.virtual_memory().percent
     disk = psutil.disk_usage('/').percent
     return cpu, mem, disk
 
 def get_network_io():
-    import psutil
     net = psutil.net_io_counters()
     sent = net.bytes_sent
     recv = net.bytes_recv

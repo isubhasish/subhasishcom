@@ -48,22 +48,46 @@ async def abort_current_task(status_msg=None, file_path=None, out=None, chat_id=
     AppState.status_snapshot = ""
     AppState.task_kind = "compress"
 
-async def take_screen_shot(video_file, output_directory, ttl):
-    out_put_file_name = os.path.join(output_directory, f"{time.time()}_thumb.jpg")
-    file_genertor_command = [
-        "ffmpeg", "-hide_banner", "-loglevel", "quiet",
-        "-ss", str(ttl), "-i", video_file, "-vframes", "1", out_put_file_name
-    ]
-    try:
-        process = await asyncio.create_subprocess_exec(
-            *file_genertor_command, 
-            stdout=asyncio.subprocess.DEVNULL, 
-            stderr=asyncio.subprocess.DEVNULL, 
-            start_new_session=True
-        )
-        await process.communicate()
-        if os.path.lexists(out_put_file_name): return out_put_file_name
-    except Exception as e: logger.error(f"Failed to generate auto-thumbnail: {e}")
+async def take_screen_shot(video_file: str, output_directory: str, ttl: int) -> str | None:
+    out_path = os.path.join(output_directory, f"{time.time()}_thumb.jpg")
+    fallback_times = sorted({ttl, max(0, ttl - 2), max(0, ttl // 2), 0})
+    for seek_t in fallback_times:
+        cmd = [
+            "ffmpeg", "-hide_banner", "-loglevel", "quiet",
+            "-ss", str(seek_t),
+            "-i",  video_file,
+            "-vframes", "1",
+            "-vf", "scale=320:-2",   
+            "-q:v", "2",             
+            "-y", out_path,
+        ]
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.DEVNULL,
+                start_new_session=True,
+            )
+            await asyncio.wait_for(proc.communicate(), timeout=20)
+            if os.path.exists(out_path) and os.path.getsize(out_path) > 1024:
+                return out_path
+        except asyncio.TimeoutError:
+            logger.warning("take_screen_shot: ffmpeg timed out at seek=%ss", seek_t)
+            try:
+                os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+                await proc.wait()
+            except Exception:
+                pass
+        except Exception as e:
+            logger.error("take_screen_shot at seek=%ss failed: %s", seek_t, e)
+            
+        if os.path.exists(out_path):
+            try:
+                os.remove(out_path)
+            except Exception:
+                pass
+                
+    logger.warning("take_screen_shot: all attempts exhausted for '%s'", video_file)
     return None
 
 async def worker():
@@ -232,7 +256,6 @@ async def worker():
                                 percent, done_str, total_str, eta_str, speed_str, elapsed_str
                             )
 
-                            # FIX: Restored exact visual layout and spacing requested
                             text = (
                                 f"ℹ️ **ɴᴏᴡ:** 💡 ENCODING...💡\n\n"
                                 f"⏱️ **ᴇᴛᴀ:** {eta_str}\n\n"

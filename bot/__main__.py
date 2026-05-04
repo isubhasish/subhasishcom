@@ -6,20 +6,13 @@ import asyncio
 import httpx
 from pyrogram import idle
 from bot import bot_app, user_app, logger
-from bot.helper_funcs.utils import START_TIME, get_readable_time, AppState
+from bot.helper_funcs.utils import START_TIME, get_readable_time, AppState, cpu_monitor
 from bot.helper_funcs.ffmpeg import worker
 
 import bot.plugins.commands
 import bot.plugins.call_back_button_handler
 import bot.plugins.incoming_message_fn
 import bot.plugins.status_message_fn
-
-# Prime CPU tracker at boot to prevent 0.0% reading
-try:
-    import psutil
-    psutil.cpu_percent()
-except Exception:
-    pass
 
 async def fetch_default_thumbnail() -> None:
     thumb_url = "https://telegra.ph/file/5c4635e173e7407694a63.jpg"
@@ -62,7 +55,9 @@ async def main():
             
         logger.info("Subhasish Encoder is fully online!")
         
+        # Start the worker and the CPU monitor as concurrent background tasks
         asyncio.create_task(worker())
+        asyncio.create_task(cpu_monitor())   # ← NEW: keeps _cpu_cache fresh
         
         if os.path.exists("restart.json"):
             try:
