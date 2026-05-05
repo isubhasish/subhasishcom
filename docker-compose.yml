@@ -12,4 +12,3 @@ services:
     environment:
       PYTHONUNBUFFERED: '1'
       TZ: 'Asia/Kolkata'
-      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'

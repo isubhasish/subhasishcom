@@ -4,7 +4,6 @@ ENV DEBIAN_FRONTEND=noninteractive \
     DEBCONF_NOWARNINGS=yes \
     PYTHONUNBUFFERED=1 \
     PATH="/opt/venv/bin:$PATH" \
-    FORCE_JAVASCRIPT_ACTIONS_TO_NODE24=true
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     apt-utils \
