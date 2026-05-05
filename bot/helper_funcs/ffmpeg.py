@@ -4,6 +4,7 @@ import time
 import re
 import traceback
 import signal
+import socket
 from datetime import datetime, timezone, timedelta
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from bot import bot_app, user_app, logger, config_data
@@ -47,6 +48,92 @@ async def abort_current_task(status_msg=None, file_path=None, out=None, chat_id=
     AppState.active_status_msg = None
     AppState.status_snapshot = ""
     AppState.task_kind = "compress"
+
+def _find_free_port() -> int:
+    """Bind to port 0 and let the OS assign an ephemeral port, then return it."""
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.bind(("127.0.0.1", 0))
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        return sock.getsockname()[1]
+
+async def start_tg_http_proxy(
+    active_client,
+    target_message,
+    port: int,
+    file_size: int,
+    progress_dict: dict
+) -> asyncio.AbstractServer:
+    """
+    Minimal asyncio TCP server that exposes the Telegram file over HTTP/1.1
+    with byte-Range support.
+    """
+    BLOCK_SIZE: int = 512 * 1024  
+
+    async def _handler(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+        try:
+            raw = b""
+            while b"\r\n\r\n" not in raw:
+                try:
+                    part = await asyncio.wait_for(reader.read(8192), timeout=15)
+                except asyncio.TimeoutError:
+                    return
+                if not part:
+                    break
+                raw += part
+            
+            req_start: int = 0
+            for line in raw.decode("utf-8", errors="ignore").split("\r\n"):
+                if line.lower().startswith("range:"):
+                    rng = line.split(":", 1)[1].strip()
+                    if rng.startswith("bytes="):
+                        token = rng[6:].split("-")[0]
+                        req_start = int(token) if token else 0
+                    break
+            
+            chunk_offset: int = req_start // BLOCK_SIZE
+            byte_skip:    int = req_start - (chunk_offset * BLOCK_SIZE)
+            content_length = max(0, file_size - req_start)
+            
+            resp_header = (
+                "HTTP/1.1 206 Partial Content\r\n"
+                "Content-Type: application/octet-stream\r\n"
+                f"Content-Range: bytes {req_start}-{file_size - 1}/{file_size}\r\n"
+                f"Content-Length: {content_length}\r\n"
+                "Accept-Ranges: bytes\r\n"
+                "Connection: close\r\n"
+                "\r\n"
+            )
+            writer.write(resp_header.encode())
+            await writer.drain()
+            
+            async for chunk in active_client.stream_media(target_message, offset=chunk_offset):
+                if AppState.cancel_task or writer.is_closing():
+                    break
+                
+                if byte_skip > 0:
+                    trim = min(len(chunk), byte_skip)
+                    chunk = chunk[trim:]
+                    byte_skip -= trim
+                    if not chunk:
+                        continue
+                try:
+                    writer.write(chunk)
+                    await writer.drain()
+                    progress_dict["downloaded"] += len(chunk) 
+                except (BrokenPipeError, ConnectionResetError, OSError):
+                    break
+        except (BrokenPipeError, ConnectionResetError):
+            pass
+        except Exception as exc:
+            logger.debug("[TG_HTTP_PROXY] handler error: %s", exc)
+        finally:
+            try:
+                writer.close()
+                await writer.wait_closed()
+            except Exception:
+                pass
+                
+    return await asyncio.start_server(_handler, "127.0.0.1", port)
 
 async def take_screen_shot(video_file: str, output_directory: str, ttl: int) -> str | None:
     out_path = os.path.join(output_directory, f"{time.time()}_thumb.jpg")

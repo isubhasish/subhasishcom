@@ -48,5 +48,5 @@ class Localisation:
     SAMPLE_BUSY = "⚠️ **Bot is Busy!**\nCannot generate a sample while a compression task is running or in queue."
     SAMPLE_DOWNLOADING = "ℹ️ **sᴛᴀᴛᴜs:** 📥 Downloading ... 📥"
     SAMPLE_PROBING = "📼 **Generating Video Duration...** 📼"
-    SAMPLE_CUTTING = "⏳ **Generating Sample...**⏳"
+    SAMPLE_CUTTING = "🔄 **Generating Sample...**🔄"
     SAMPLE_UPLOADING = "ℹ️ **sᴛᴀᴛᴜs:** 📤 Uploading ... 📤"

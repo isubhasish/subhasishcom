@@ -11,15 +11,17 @@ import traceback
 import gc
 import speedtest
 import re 
+import psutil
 from pyrogram import filters
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from bot import bot_app, user_app, config_data, logger
 from bot.config import Config
 from bot.localisation import Localisation
-from bot.helper_funcs.utils import AppState, TaskState, queue, START_TIME, get_readable_time, send_log, get_file_info, kill_running_process, delete_message_later
+from bot.helper_funcs.utils import AppState, TaskState, queue, START_TIME, get_readable_time, send_log, get_file_info, kill_running_process, delete_message_later, get_network_io
 from bot.helper_funcs.download import get_graph_link
 from bot.helper_funcs.display_progress import humanbytes, make_bar, time_formatter, render_active_status, get_sys_stats, progress_bar
 from bot.plugins.call_back_button_handler import get_bsetting_menu
+from bot.helper_funcs.ffmpeg import abort_current_task, take_screen_shot, start_tg_http_proxy, _find_free_port
 
 UNAUTH_MSG = "<b>You are not allowed to do that 🤭</b>"
 
@@ -200,11 +202,10 @@ async def mediainfo_cmd(client, message):
         if real_path and os.path.exists(real_path): os.remove(real_path)
 
 async def generate_sample_background(client, target_message, status_msg):
-    from bot.helper_funcs.ffmpeg import abort_current_task, take_screen_shot
-    
     probe_path: str | None = None
     sample_out: str | None = None
     gen_thumb: str | None = None          
+    proxy_server: asyncio.AbstractServer | None = None
     
     user_id = target_message.from_user.id if target_message.from_user else 0
     custom_thumb = os.path.join(Config.THUMB_DIR, f"{user_id}.jpg")
@@ -215,74 +216,57 @@ async def generate_sample_background(client, target_message, status_msg):
     AppState.active_origin_msg = target_message
     AppState.active_status_msg = status_msg
     
-    AppState.active_file_name = getattr(
-        target_message.video or target_message.document, "file_name", "sample_source"
-    )
-    AppState.status_snapshot = Localisation.SAMPLE_DOWNLOADING
+    media = target_message.video or target_message.document
+    AppState.active_file_name = getattr(media, "file_name", "sample_source")
+    AppState.status_snapshot = Localisation.SAMPLE_CUTTING
     
-    sample_btn = InlineKeyboardMarkup([
-        [InlineKeyboardButton("🛑 Cancel Task", callback_data="cancel_running")]
-    ])
+    sample_btn = InlineKeyboardMarkup([[InlineKeyboardButton("🛑 Cancel Task", callback_data="cancel_running")]])
     
     try:
         active_client = user_app if user_app else bot_app
-        media = target_message.video or target_message.document
         if not media:
             return await status_msg.edit("⚠️ No media found on this message.")
         file_size: int = media.file_size or 0
 
-        # ---------- PROBING ----------
-        await status_msg.edit(Localisation.SAMPLE_PROBING, reply_markup=sample_btn)
+        # ---------- RESOLVE DURATION ----------
+        total_duration = float(getattr(media, "duration", 0) or 0)
         
-        probe_path = f"probe_{uuid.uuid4().hex[:10]}.mkv"
-        PROBE_CHUNKS = 8  
-        bytes_written = 0
-        
-        with open(probe_path, "wb") as pf:
-            async for chunk in active_client.stream_media(target_message, limit=PROBE_CHUNKS):
-                if AppState.cancel_task:
-                    raise asyncio.CancelledError()
-                pf.write(chunk)
-                bytes_written += len(chunk)
-                
-        if AppState.cancel_task:
-            raise asyncio.CancelledError()
+        if total_duration < 1.0:
+            await status_msg.edit(Localisation.SAMPLE_PROBING, reply_markup=sample_btn)
+            probe_path = f"/tmp/probe_{uuid.uuid4().hex[:10]}.mkv"
+            with open(probe_path, "wb") as pf:
+                async for chunk in active_client.stream_media(target_message, limit=8):
+                    if AppState.cancel_task: raise asyncio.CancelledError()
+                    pf.write(chunk)
+            if AppState.cancel_task: raise asyncio.CancelledError()
 
-        probe_proc = await asyncio.create_subprocess_exec(
-            "ffprobe", "-v", "error",
-            "-show_entries", "format=duration",
-            "-of", "default=noprint_wrappers=1:nokey=1",
-            probe_path,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.DEVNULL,
-            start_new_session=True,
-        )
-        
-        async with AppState.process_lock:
-            AppState.current_process = probe_proc
-            
-        try:
-            probe_stdout, _ = await asyncio.wait_for(probe_proc.communicate(), timeout=30)
-        except asyncio.TimeoutError:
-            try:
-                os.killpg(os.getpgid(probe_proc.pid), signal.SIGKILL)
-            except Exception:
-                pass
-            raise Exception("FFProbe timed out during header probe.")
-        finally:
+            probe_proc = await asyncio.create_subprocess_exec(
+                "ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", probe_path,
+                stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL, start_new_session=True,
+            )
             async with AppState.process_lock:
-                if AppState.current_process == probe_proc:
-                    AppState.current_process = None
-
-        if probe_path and os.path.exists(probe_path):
-            os.remove(probe_path)
-        probe_path = None
-        
-        try:
-            total_duration = float(probe_stdout.decode("utf-8").strip())
-        except (ValueError, TypeError):
-            total_duration = 0.0
+                AppState.current_process = probe_proc
+            try: probe_stdout, _ = await asyncio.wait_for(probe_proc.communicate(), timeout=30)
+            except asyncio.TimeoutError:
+                try: os.killpg(os.getpgid(probe_proc.pid), signal.SIGKILL)
+                except Exception: pass
+                raise Exception("FFProbe timed out during header probe.")
+            finally:
+                async with AppState.process_lock:
+                    if AppState.current_process == probe_proc: AppState.current_process = None
+            if probe_path and os.path.exists(probe_path):
+                os.remove(probe_path)
+            probe_path = None
             
+            try: total_duration = float(probe_stdout.decode("utf-8").strip())
+            except (ValueError, TypeError): total_duration = 0.0
+        else:
+            await status_msg.edit(
+                "⚡️ **Fast Sample Mode Active**\n"
+                "📡 Duration from metadata — probe step skipped!\n",
+                reply_markup=sample_btn,
+            )
+
         SAMPLE_DURATION = 30
         MIN_LEN = SAMPLE_DURATION + 15
         
@@ -291,20 +275,23 @@ async def generate_sample_background(client, target_message, status_msg):
                 f"❎**ᴠɪᴅᴇᴏ ɪs ᴛᴏᴏ sʜᴏʀᴛ ᴛᴏ ɢᴇɴᴇʀᴀᴛᴇ ᴀ** `{SAMPLE_DURATION}s` **sᴀᴍᴘʟᴇ, ʏᴏᴜ ɴᴇᴇᴅ ᴀᴛ ʟᴇᴀsᴛ** `{MIN_LEN}s` **ᴛɪᴍᴇ ғᴏʀ ᴛʜɪs** `{int(total_duration)}s` **ᴅᴜʀᴀᴛɪᴏɴ ᴠɪᴅᴇᴏ, ᴜsᴇ ᴀɴᴏᴛʜᴇʀ ᴠɪᴅᴇᴏ.**❎"
             )
             
-        if AppState.cancel_task:
-            raise asyncio.CancelledError()
+        if AppState.cancel_task: raise asyncio.CancelledError()
 
-        # ---------- CHOOSE RANDOM CUT POINT ----------
+        # ---------- RANDOM CUT POINT & PROXY SETUP ----------
         start_time_cut = random.uniform(10.0, total_duration - (SAMPLE_DURATION + 5))
         cut_str        = time.strftime("%H:%M:%S", time.gmtime(start_time_cut))
-        sample_out     = f"Sample_{uuid.uuid4().hex[:12]}.mkv"
-        est_feed_bytes = int((start_time_cut / total_duration) * file_size) if total_duration > 0 else file_size
+        sample_out     = f"/tmp/Sample_{uuid.uuid4().hex[:12]}.mkv"
+        
+        proxy_port = _find_free_port()
+        progress_dict = {"downloaded": 0}
+        proxy_server = await start_tg_http_proxy(active_client, target_message, proxy_port, file_size, progress_dict)
+        file_url = f"http://127.0.0.1:{proxy_port}/"
 
-        # ---------- PIPE STREAM → FFMPEG CUT ----------
+        # ---------- FFMPEG INPUT SEEKING ----------
         cut_cmd = [
             "ffmpeg", "-hide_banner", "-loglevel", "quiet", "-nostats",
-            "-i", "pipe:0",
             "-ss", f"{start_time_cut:.3f}",   
+            "-i", file_url,
             "-t",  str(SAMPLE_DURATION),
             "-c",  "copy",                     
             "-avoid_negative_ts", "make_zero",
@@ -312,115 +299,129 @@ async def generate_sample_background(client, target_message, status_msg):
         ]
         
         cut_proc = await asyncio.create_subprocess_exec(
-            *cut_cmd,
-            stdin=asyncio.subprocess.PIPE,
-            stdout=asyncio.subprocess.DEVNULL,
-            stderr=asyncio.subprocess.DEVNULL,
-            start_new_session=True,
+            *cut_cmd, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL, start_new_session=True,
         )
-        
-        async with AppState.process_lock:
+        async with AppState.process_lock: 
             AppState.current_process = cut_proc
             
+        MAX_WAIT_SEC = 300.0
+        POLL_SEC     = 1.5
+        wait_start   = time.time()
         last_ui_update = time.time() - 6
-        total_fed      = 0
-        feed_start     = time.time()
+        gen_start = time.time()
         
-        try:
-            async for chunk in active_client.stream_media(target_message):
-                if AppState.cancel_task:
-                    raise asyncio.CancelledError()
-                if cut_proc.returncode is not None:
-                    break
-                try:
-                    cut_proc.stdin.write(chunk)
-                    await cut_proc.stdin.drain()
-                except (BrokenPipeError, ConnectionResetError, OSError):
-                    break
-                    
-                total_fed += len(chunk)
-                now = time.time()
-                
-                if now - last_ui_update >= 5:
-                    last_ui_update = now
-                    elapsed   = max(now - feed_start, 0.001)
-                    speed     = total_fed / elapsed
-                    pct_fed   = (total_fed / file_size * 100) if file_size > 0 else 0
-                    target_pct = (start_time_cut / total_duration * 100) if total_duration > 0 else 50
-                    cut_pct    = min(pct_fed / target_pct * 100, 99.0) if target_pct > 0 else pct_fed
-                    cpu, mem, _ = get_sys_stats()
-                    speed_str = humanbytes(speed)
-                    eta_str = time_formatter(((est_feed_bytes - total_fed) / speed * 1000) if speed > 0 else 0)
-                    
-                    text = (
-                        f"{Localisation.SAMPLE_DOWNLOADING}\n\n"
-                        f"[{make_bar(cut_pct)}]\n"
-                        f"☞☢️ **ᴘʀᴏɢʀᴇss:** {cut_pct:.1f}%\n"
-                        f"📦 **sɪᴢᴇ:** {humanbytes(total_fed)} of ~{humanbytes(est_feed_bytes)}\n"
-                        f"💎 **ᴛᴀʀɢᴇᴛ:** `{cut_str}` 💠 **sᴀᴍᴘʟᴇ:** `{SAMPLE_DURATION}s`\n"
-                        f"⚡️ **ꜱᴘᴇᴇᴅ:** {speed_str}/s\n"
-                        f"⏱️ **ᴇᴛᴀ:** {eta_str}\n"
-                        f"🖥 **CPU:** {cpu}% | 💽 **RAM:** {mem}%"
-                    )
-                    try:
-                        await status_msg.edit(text, reply_markup=sample_btn)
-                    except Exception:
-                        pass
-                    AppState.status_snapshot = text
-                    
-        except asyncio.CancelledError:
-            raise
-        except Exception as feed_err:
-            logger.warning("[SAMPLEGEN] Stream feed error (non-fatal): %s", feed_err)
-        finally:
-            try:
-                cut_proc.stdin.close()
-            except Exception:
-                pass
-                
-        if AppState.cancel_task:
-            raise asyncio.CancelledError()
+        current_phase = "Sample Generating"
+        
+        while True:
+            if AppState.cancel_task:
+                await kill_running_process()
+                raise asyncio.CancelledError("Task Cancelled by User")
             
-        try:
-            await asyncio.wait_for(cut_proc.wait(), timeout=120)
-        except asyncio.TimeoutError:
+            if cut_proc.returncode is not None:
+                break
+                
+            now = time.time()
+            if now - last_ui_update >= 1.5:
+                last_ui_update = now
+                elapsed = max(now - gen_start, 0.001)
+                total_fed = progress_dict["downloaded"]
+                speed = total_fed / elapsed if elapsed > 0 else 0
+                
+                pct = min((total_fed / file_size) * 100, 99.9) if file_size > 0 else 0
+                cpu, mem, disk = get_sys_stats()
+                speed_str = humanbytes(speed)
+                est_rem = max(0, 15 - elapsed) 
+                eta_str = time_formatter(est_rem * 1000)
+                
+                # --- EXACT PRIMARY UI LAYOUT ---
+                primary_text = (
+                    f"{Localisation.SAMPLE_CUTTING}\n\n"
+                    f"[{make_bar(pct)}]\n"
+                    f"☞☢️ **ᴘʀᴏɢʀᴇss:** {pct:.1f}%\n"
+                    f"📦 **sɪᴢᴇ:** {humanbytes(total_fed)} of {humanbytes(file_size)}\n"
+                    f"💎 **ᴛᴀʀɢᴇᴛ:** `{cut_str}` 💠 **sᴀᴍᴘʟᴇ:** `{SAMPLE_DURATION}s`\n"
+                    f"⚡️ **ꜱᴘᴇᴇᴅ:** {speed_str}/s\n"
+                    f"⏱️ **ᴇᴛᴀ:** {eta_str}\n"
+                    f"🖥 **CPU:** {cpu}% | 💽 **RAM:** {mem}%"
+                )
+                
+                # --- EXACT SECONDARY /STATUS LAYOUT ---
+                sent, recv = get_network_io()
+                free_disk_gb = round(psutil.disk_usage('/').free / (1024**3), 2)
+                uptime_str = get_readable_time((time.time() - START_TIME)*1000)
+                elapsed_str = time.strftime('%Ss', time.gmtime(elapsed))
+                
+                secondary_text = (
+                    f"🌐 Bᴏᴛ Sᴛᴀᴛɪsᴛɪᴄs 🌐\n"
+                    f"{AppState.active_file_name}\n"
+                    f"[{make_bar(pct)}] {pct:.2f}%\n"
+                    f"**Processed:** {humanbytes(total_fed)} of {humanbytes(file_size)}\n"
+                    f"**Target:** {cut_str} | **Sample:** {SAMPLE_DURATION}s\n"
+                    f"**Status:** {current_phase} | **ETA:** {eta_str}\n"
+                    f"**Speed:** {speed_str}/s | **Elapsed:** {elapsed_str}\n\n"
+                    f"🖥 **Hardware Info:**\n"
+                    f"**CPU:** {cpu}% | **Free:** {free_disk_gb}GB ({100-disk}%)\n"
+                    f"**In:** {humanbytes(recv)} | **Out:** {humanbytes(sent)}\n"
+                    f"**Ram:** {mem}% | **Uptime:** {uptime_str}\n\n"
+                    f"🏷Maintained By: @{AppState.bot_username}"
+                )
+                
+                try: await status_msg.edit(primary_text, reply_markup=sample_btn)
+                except Exception: pass
+                AppState.status_snapshot = secondary_text
+                
+            if time.time() - wait_start > MAX_WAIT_SEC:
+                try:
+                    os.killpg(os.getpgid(cut_proc.pid), signal.SIGKILL)
+                except Exception:
+                    pass
+                return await status_msg.edit(
+                    "⚠️ Sample cut timed out.\n"
+                    "The HTTP seek may have stalled — please try again."
+                )
+                
+            await asyncio.sleep(POLL_SEC)
+
+        async with AppState.process_lock:
+            if AppState.current_process == cut_proc:
+                AppState.current_process = None
+                
+        # --- PROXY SAFETY NET BEFORE COMPLETION ---
+        if proxy_server is not None:
             try:
-                os.killpg(os.getpgid(cut_proc.pid), signal.SIGKILL)
+                proxy_server.close()
+                await proxy_server.wait_closed()
             except Exception:
                 pass
-            return await status_msg.edit("⚠️ Sample cut timed out. The source video may be non-seekable in this format.")
-        finally:
-            async with AppState.process_lock:
-                if AppState.current_process == cut_proc:
-                    AppState.current_process = None
-                    
-        if AppState.cancel_task:
-            raise asyncio.CancelledError()
+            proxy_server = None
+            
+        if AppState.cancel_task: raise asyncio.CancelledError()
+
+        gen_elapsed = int(time.time() - gen_start)
             
         if not os.path.exists(sample_out) or os.path.getsize(sample_out) < 4096:
-            return await status_msg.edit(
-                "⚠️ Sample output is empty or corrupt.\n"
-                "The stream-copy may have missed a keyframe near the cut point. "
-                "Please try again — a different random position will be chosen."
-            )
+            return await status_msg.edit("⚠️ Sample output is empty or corrupt. Please try again.")
 
         # ---------- THUMBNAIL GENERATION ----------
         if actual_thumb is None:
-            sample_len = os.path.getsize(sample_out)
             for seek_t in (5, 3, 1, 0):
-                if seek_t >= SAMPLE_DURATION:
-                    continue
+                if seek_t >= SAMPLE_DURATION: continue
                 candidate = await take_screen_shot(sample_out, Config.THUMB_DIR, seek_t)
                 if candidate and os.path.exists(candidate) and os.path.getsize(candidate) > 1024:
-                    gen_thumb    = candidate
+                    gen_thumb = candidate
                     actual_thumb = gen_thumb
                     break
 
         # ---------- UPLOAD ----------
+        current_phase = "Uploading"
+        if 'secondary_text' in locals():
+            AppState.status_snapshot = secondary_text.replace("Sample Generating", current_phase)
+            
+        # <--- HERE IS Localisation.SAMPLE_UPLOADING --->
         await status_msg.edit(Localisation.SAMPLE_UPLOADING, reply_markup=sample_btn)
         
         caption = (
-            f"<b>Extracted</b> `{SAMPLE_DURATION}s` <b>From {cut_str} Of</b> `{AppState.active_file_name}`\n\n"
+            f"✅ <b>Successfully Extracted</b> `{SAMPLE_DURATION}s` <b>From {cut_str} Of</b> `{AppState.active_file_name}` <b>In {gen_elapsed}S.</b>\n\n"
             f"<b>©ᴇɴᴄᴏᴅᴇᴅ Bʏ:</b> <b>@{AppState.bot_username}</b>"
         )
         
@@ -438,32 +439,34 @@ async def generate_sample_background(client, target_message, status_msg):
             progress_args=("Uploading", status_msg, upload_start, last_up_time),
             reply_to_message_id=target_message.id,
         )
-        try:
-            await status_msg.delete()
-        except Exception:
-            pass
+        try: await status_msg.delete()
+        except Exception: pass
 
     except asyncio.CancelledError:
         await abort_current_task(status_msg, probe_path, sample_out, chat_id=target_message.chat.id)
     except Exception as e:
         logger.error("[SAMPLEGEN ERROR] %s\n%s", e, traceback.format_exc())
-        try:
-            await status_msg.edit(f"❌ **Sample Generation Error:**\n`{e}`")
-        except Exception:
-            pass
+        try: await status_msg.edit(f"❌ **Sample Generation Error:**\n`{e}`")
+        except Exception: pass
     finally:
-        for path in filter(None, [probe_path, sample_out]):
+        # --- PROXY SAFETY NET IN FINALLY BLOCK ---
+        if proxy_server is not None:
             try:
-                if os.path.exists(path):
-                    os.remove(path)
+                proxy_server.close()
+                await proxy_server.wait_closed()
             except Exception:
                 pass
+            proxy_server = None
+            
+        for path in filter(None, [probe_path, sample_out]):
+            try:
+                if os.path.exists(path): os.remove(path)
+            except Exception: pass
                 
         if gen_thumb and os.path.exists(gen_thumb) and gen_thumb != custom_thumb:
             try:
                 os.remove(gen_thumb)
-            except Exception:
-                pass
+            except Exception: pass
                 
         AppState.task_state       = TaskState.IDLE
         AppState.task_kind        = "compress"
@@ -477,27 +480,18 @@ async def generate_sample_background(client, target_message, status_msg):
 
 @bot_app.on_message(filters.command("samplegen"))
 async def samplegen_cmd(client, message):
-    if not is_sudo(message):
-        return await message.reply(UNAUTH_MSG)
-    if AppState.task_state != TaskState.IDLE or not queue.empty():
-        return await message.reply(Localisation.SAMPLE_BUSY)
-    if not message.reply_to_message:
-        return await message.reply("⚠️ Please reply to a video to generate a sample.")
+    if not is_sudo(message): return await message.reply(UNAUTH_MSG)
+    if AppState.task_state != TaskState.IDLE or not queue.empty(): return await message.reply(Localisation.SAMPLE_BUSY)
+    if not message.reply_to_message: return await message.reply("⚠️ Please reply to a video to generate a sample.")
+    
     if getattr(message.reply_to_message, "audio", None) or getattr(message.reply_to_message, "voice", None):
-        await send_log(
-            f"⚠️ **Abuse Warning:** User @{message.from_user.username} "
-            f"tried to use /samplegen on an Audio file."
-        )
+        await send_log(f"⚠️ **Abuse Warning:** User @{message.from_user.username} tried to use /samplegen on an Audio file.")
         return await message.reply("⚠️ `/samplegen` only works on Videos, not Audio files!")
-    if (
-        not getattr(message.reply_to_message, "video",    None)
-        and not getattr(message.reply_to_message, "document", None)
-    ):
+        
+    if not getattr(message.reply_to_message, "video", None) and not getattr(message.reply_to_message, "document", None):
         return await message.reply("⚠️ Please reply to a video or document to generate a sample.")
         
-    msg = await message.reply(
-        "⏳ **Initializing Fast Sample Generator...** 📡\n"
-    )
+    msg = await message.reply("⏳ **Initializing Fast Sample Generator...** 📡\n")
     asyncio.create_task(generate_sample_background(client, message.reply_to_message, msg))
 
 @bot_app.on_message(filters.command("clearlocals"))
