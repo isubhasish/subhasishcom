@@ -332,14 +332,12 @@ async def generate_sample_background(client, target_message, status_msg):
                 cpu, mem, disk = get_sys_stats()
                 speed_str = humanbytes(speed)
                 
-                # --- DYNAMIC ETA FIX ---
                 if speed > 0:
-                    expected_bytes = 16 * 1024 * 1024 # Approx 16MB expected for 30s Fast Seek
+                    expected_bytes = 16 * 1024 * 1024
                     rem_bytes = max(0, expected_bytes - total_fed)
                     est_rem = rem_bytes / speed
                 else:
                     est_rem = max(1, 15 - elapsed)
-                # Ensure it never gets stuck at 00s before completing
                 est_rem = max(1, est_rem)
                 eta_str = time_formatter(est_rem * 1000)
                 
@@ -450,7 +448,7 @@ async def generate_sample_background(client, target_message, status_msg):
             pass
         
         caption = (
-            f"✅ <b>Successfully Extracted</b> `{SAMPLE_DURATION}s` <b>From {cut_str} Of</b> `{AppState.active_file_name}` <b>In {gen_elapsed}S.</b>\n\n"
+            f"✅ <b>Successfully Extracted</b> `{SAMPLE_DURATION}s` <b>From {cut_str} Of</b> `{AppState.active_file_name}` <b>In {gen_elapsed} Seconds.</b>\n\n"
             f"<b>©ᴇɴᴄᴏᴅᴇᴅ Bʏ:</b> <b>@{AppState.bot_username}</b>"
         )
         

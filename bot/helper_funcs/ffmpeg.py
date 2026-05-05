@@ -168,8 +168,8 @@ async def take_screen_shot(video_file: str, output_directory: str, ttl: int) -> 
             "-ss", str(seek_t),
             "-i",  video_file,
             "-vframes", "1",
-            # ── PERFECT ALIGNMENT FIX: Prevents Telegram from squishing the thumbnail ──
-            "-vf", "scale=320:320:force_original_aspect_ratio=decrease",   
+            # ── PERFECT ALIGNMENT FIX: Prevents Telegram from squishing by forcing the longest edge to 320 and scaling proportionally to an even integer ──
+            "-vf", "scale='if(gt(iw,ih),320,-2)':'if(gt(iw,ih),-2,320)'",   
             "-q:v", "2",             
             "-y", out_path,
         ]
