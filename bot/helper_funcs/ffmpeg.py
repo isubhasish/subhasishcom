@@ -67,7 +67,8 @@ async def start_tg_http_proxy(
     Minimal asyncio TCP server that exposes the Telegram file over HTTP/1.1
     with STRICT byte-Range support to prevent over-downloading.
     """
-    BLOCK_SIZE: int = 512 * 1024  
+    # ── CRITICAL FIX: Pyrogram uses exactly 1 MiB chunks! ──
+    BLOCK_SIZE: int = 1024 * 1024  
 
     async def _handler(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
         try:
