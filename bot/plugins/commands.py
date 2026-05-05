@@ -433,6 +433,26 @@ async def generate_sample_background(client, target_message, status_msg):
                     actual_thumb = gen_thumb
                     break
 
+        # ---------- EXTRACT DIMENSIONS TO PREVENT THUMBNAIL SQUASHING ----------
+        vid_width = getattr(media, 'width', 0)
+        vid_height = getattr(media, 'height', 0)
+        
+        if not vid_width or not vid_height:
+            try:
+                probe = await asyncio.create_subprocess_exec(
+                    "ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=width,height", "-of", "csv=s=x:p=0", sample_out,
+                    stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL
+                )
+                stdout, _ = await asyncio.wait_for(probe.communicate(), timeout=5)
+                dim_out = stdout.decode().strip().split('\n')[0].split('x')
+                if len(dim_out) == 2:
+                    vid_width, vid_height = int(dim_out[0]), int(dim_out[1])
+            except Exception:
+                pass
+                
+        vid_width = vid_width or 1280
+        vid_height = vid_height or 720
+
         # ---------- UPLOAD ----------
         current_phase = "Uploading"
         if 'secondary_text' in locals():
@@ -460,6 +480,8 @@ async def generate_sample_background(client, target_message, status_msg):
             video=sample_out,
             caption=caption,
             thumb=actual_thumb,
+            width=vid_width,
+            height=vid_height,
             duration=SAMPLE_DURATION,
             supports_streaming=True,
             progress=progress_bar,
