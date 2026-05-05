@@ -3,7 +3,7 @@ FROM python:3.10-slim-bookworm
 ENV DEBIAN_FRONTEND=noninteractive \
     DEBCONF_NOWARNINGS=yes \
     PYTHONUNBUFFERED=1 \
-    PATH="/opt/venv/bin:$PATH" \
+    PATH="/opt/venv/bin:$PATH"
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     apt-utils \
