@@ -6,6 +6,7 @@ import asyncio
 import httpx
 from pyrogram import idle
 from bot import bot_app, user_app, logger
+from bot.config import Config
 from bot.helper_funcs.utils import START_TIME, get_readable_time, AppState, cpu_monitor
 from bot.helper_funcs.ffmpeg import worker
 
@@ -16,13 +17,15 @@ import bot.plugins.status_message_fn
 
 async def fetch_default_thumbnail() -> None:
     thumb_url = "https://telegra.ph/file/5c4635e173e7407694a63.jpg"
+    thumb_path = os.path.join(Config.ENV_DIR, "thumb.jpg")
+    
     try:
         async with httpx.AsyncClient(timeout=httpx.Timeout(20), follow_redirects=True) as client:
             resp = await client.get(thumb_url)
             resp.raise_for_status()
-        with open("thumb.jpg", "wb") as f:
+        with open(thumb_path, "wb") as f:
             f.write(resp.content)
-        logger.info("Default universal thumbnail saved to thumb.jpg")
+        logger.info("Default universal thumbnail saved to %s", thumb_path)
     except Exception as e:
         logger.warning("Default thumbnail download skipped: %s", e)
 
@@ -57,11 +60,12 @@ async def main():
         
         # Start the worker and the CPU monitor as concurrent background tasks
         asyncio.create_task(worker())
-        asyncio.create_task(cpu_monitor())   # ← NEW: keeps _cpu_cache fresh
+        asyncio.create_task(cpu_monitor())   # ← keeps _cpu_cache fresh
         
-        if os.path.exists("restart.json"):
+        restart_path = os.path.join(Config.ENV_DIR, "restart.json")
+        if os.path.exists(restart_path):
             try:
-                with open("restart.json", "r") as f:
+                with open(restart_path, "r") as f:
                     data = json.load(f)
                     chat_id = data.get("chat_id")
                     msg_id = data.get("message_id")
@@ -74,8 +78,8 @@ async def main():
             except Exception as e:
                 logger.error(f"Failed to edit restart msg: {e}")
             finally:
-                if os.path.exists("restart.json"):
-                    os.remove("restart.json")
+                if os.path.exists(restart_path):
+                    os.remove(restart_path)
             
         await idle()
         

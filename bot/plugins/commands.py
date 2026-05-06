@@ -162,7 +162,10 @@ async def log_cmd(client, message):
     if not is_sudo(message): return await message.reply(UNAUTH_MSG)
     msg = await message.reply("⏳ Fetching bot logs...")
     try:
-        with open("bot.log", "r") as f: log_data = f.read()[-30000:] 
+        log_path = os.path.join(Config.ENV_DIR, "bot.log")
+        if not os.path.exists(log_path): return await msg.edit("⚠️ Log file is empty or not yet created.")
+        
+        with open(log_path, "r") as f: log_data = f.read()[-30000:] 
         if not log_data: return await msg.edit("⚠️ Log file is empty.")
         
         content_json = []
@@ -459,7 +462,7 @@ async def generate_sample_background(client, target_message, status_msg):
                     actual_thumb = gen_thumb
                     break
 
-        # ---------- EXTRACT DIMENSIONS TO PREVENT THUMBNAIL SQUASHING ----------
+        # ---------- EXTRACT DIMENSIONS ----------
         vid_width = getattr(media, 'width', 0)
         vid_height = getattr(media, 'height', 0)
         
@@ -597,7 +600,8 @@ async def restart_cmd(client, message):
         except Exception as e:
             logger.error(f"❎ **Oops...!! Failed to load the latest data...** ❎ | Reason: {e}")
             
-    with open("restart.json", "w") as f: json.dump({"chat_id": msg.chat.id, "message_id": msg.id}, f)
+    restart_path = os.path.join(Config.ENV_DIR, "restart.json")
+    with open(restart_path, "w") as f: json.dump({"chat_id": msg.chat.id, "message_id": msg.id}, f)
     os.execl(sys.executable, sys.executable, "-m", "bot")
 
 @bot_app.on_message(filters.command("cancelall"))
@@ -683,9 +687,10 @@ async def eval_handler(client, message):
     final_output = f"<b>EVAL</b>: <code>{cmd}</code>\n\n<b>OUTPUT</b>:\n<code>{evaluation.strip()}</code>\n"
 
     if len(final_output) > 4000:
-        with open("eval.txt", "w+", encoding="utf8") as out_file: out_file.write(str(final_output))
-        await message.reply_document(document="eval.txt", caption=cmd[:100], disable_notification=True)
-        os.remove("eval.txt"); await msg.delete()
+        eval_path = os.path.join(Config.ENV_DIR, "eval.txt")
+        with open(eval_path, "w+", encoding="utf8") as out_file: out_file.write(str(final_output))
+        await message.reply_document(document=eval_path, caption=cmd[:100], disable_notification=True)
+        os.remove(eval_path); await msg.delete()
     else: await msg.edit(final_output)
 
 @bot_app.on_message(filters.command("broadcast"))

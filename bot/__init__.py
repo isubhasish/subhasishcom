@@ -11,14 +11,18 @@ logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - [%(levelname)s] - %(message)s",
     handlers=[
-        RotatingFileHandler("bot.log", maxBytes=20000000, backupCount=5),
+        RotatingFileHandler(
+            os.path.join(Config.ENV_DIR, "bot.log"), 
+            maxBytes=20000000, 
+            backupCount=5
+        ),
         logging.StreamHandler()
     ]
 )
 logger = logging.getLogger(__name__)
 
 bot_app = Client(
-    "bot_session",
+    os.path.join(Config.ENV_DIR, "encoder_bot"),
     api_id=config_data["API_ID"],
     api_hash=config_data["API_HASH"],
     bot_token=config_data["TG_BOT_TOKEN"]
@@ -27,7 +31,7 @@ bot_app = Client(
 if config_data.get("USER_SESSION_STRING"):
     logger.info("✅ User Session detected. Evaluating Account Tier limits...")
     user_app = Client(
-        "user_session_string",
+        os.path.join(Config.ENV_DIR, "encoder_user"),
         session_string=config_data["USER_SESSION_STRING"],
         api_id=config_data["API_ID"],
         api_hash=config_data["API_HASH"]

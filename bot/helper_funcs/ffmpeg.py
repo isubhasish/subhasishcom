@@ -223,7 +223,7 @@ async def worker():
         actual_thumb = None 
         
         custom_thumb = os.path.join(Config.THUMB_DIR, f"{msg.from_user.id}.jpg")
-        default_thumb = "thumb.jpg"
+        default_thumb = os.path.join(Config.ENV_DIR, "thumb.jpg")
         
         try:
             now_time = get_ist()

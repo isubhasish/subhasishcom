@@ -76,7 +76,7 @@ async def panel_handler(client, cb):
 
     if action == "info":
         await cb.message.edit("📝 Probing MediaInfo...")
-        chunk_path = f"probe_{uuid.uuid4().hex}.mkv"
+        chunk_path = f"/tmp/probe_{uuid.uuid4().hex}.mkv"
         
         try:
             active_client = user_app if user_app else bot_app
@@ -140,7 +140,7 @@ async def panel_handler(client, cb):
 
     elif action == "select":
         await cb.message.edit("⏳ Fetching Stream List...")
-        chunk_path = f"probe_{uuid.uuid4().hex}.mkv"
+        chunk_path = f"/tmp/probe_{uuid.uuid4().hex}.mkv"
         try:
             active_client = user_app if user_app else bot_app
             with open(chunk_path, "wb") as f:

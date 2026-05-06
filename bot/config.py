@@ -2,9 +2,10 @@ import os
 import json
 
 class Config:
-    CONFIG_FILE = "config.json"
-    THUMB_DIR = "thumbnails"
+    ENV_DIR = "subhasishenv"
 
+    CONFIG_FILE = os.path.join(ENV_DIR, "config.json")
+    THUMB_DIR = os.path.join(ENV_DIR, "thumbnails")
     TG_BOT_TOKEN = "your_bot_token"
     API_ID = 123456
     API_HASH = "your_api_hash"
@@ -24,6 +25,12 @@ class Config:
 
     @classmethod
     def load_config(cls):
+        if not os.path.exists(cls.ENV_DIR):
+            os.makedirs(cls.ENV_DIR)
+
+        if not os.path.exists(cls.THUMB_DIR):
+            os.makedirs(cls.THUMB_DIR)
+
         if not os.path.exists(cls.CONFIG_FILE):
             default_config = cls.get_default_config()
             cls.save_config(default_config)
@@ -33,6 +40,9 @@ class Config:
 
     @classmethod
     def save_config(cls, config_data):
+        if not os.path.exists(cls.ENV_DIR):
+            os.makedirs(cls.ENV_DIR)
+            
         with open(cls.CONFIG_FILE, "w") as file:
             json.dump(config_data, file, indent=4)
 
