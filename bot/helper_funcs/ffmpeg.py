@@ -67,7 +67,6 @@ async def start_tg_http_proxy(
     Minimal asyncio TCP server that exposes the Telegram file over HTTP/1.1
     with STRICT byte-Range support to prevent over-downloading.
     """
-    # ── CRITICAL FIX: Pyrogram uses exactly 1 MiB chunks! ──
     BLOCK_SIZE: int = 1024 * 1024  
 
     async def _handler(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
@@ -85,7 +84,6 @@ async def start_tg_http_proxy(
             req_start: int = 0
             req_end: int = file_size - 1
             
-            # --- STRICT BOUND PARSING ---
             for line in raw.decode("utf-8", errors="ignore").split("\r\n"):
                 if line.lower().startswith("range:"):
                     rng = line.split(":", 1)[1].strip()
@@ -119,7 +117,6 @@ async def start_tg_http_proxy(
             await writer.drain()
             
             sent_bytes = 0
-            # --- STRICT LIMIT PASSED TO PYROGRAM ---
             async for chunk in active_client.stream_media(target_message, offset=chunk_offset, limit=chunk_limit):
                 if AppState.cancel_task or writer.is_closing():
                     break
@@ -131,7 +128,6 @@ async def start_tg_http_proxy(
                     if not chunk:
                         continue
                 
-                # --- PREVENT SENDING EXCESS BYTES ---
                 if sent_bytes + len(chunk) > bytes_to_send:
                     chunk = chunk[:bytes_to_send - sent_bytes]
 
@@ -168,7 +164,6 @@ async def take_screen_shot(video_file: str, output_directory: str, ttl: int) -> 
             "-ss", str(seek_t),
             "-i",  video_file,
             "-vframes", "1",
-            # ── PERFECT ALIGNMENT FIX: Prevents Telegram from squishing by forcing the longest edge to 320 and scaling proportionally to an even integer ──
             "-vf", "scale='if(gt(iw,ih),320,-2)':'if(gt(iw,ih),-2,320)'",   
             "-q:v", "2",             
             "-y", out_path,

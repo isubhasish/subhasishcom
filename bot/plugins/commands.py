@@ -391,7 +391,7 @@ async def generate_sample_background(client, target_message, status_msg):
                     f"**Target:** {cut_str} | **Sample:** {SAMPLE_DURATION}s\n"
                     f"**Status:** {current_phase} | **ETA:** {eta_str}\n"
                     f"**Speed:** {speed_str}/s | **Elapsed:** {elapsed_str}\n\n"
-                    f"🖥 **Hardware Info:**\n"
+                    f"🔰 <b><u>Hardware Info:</u></b> 🔰\n"
                     f"**CPU:** {cpu}% | **Free:** {free_disk_gb}GB ({100-disk}%)\n"
                     f"**In:** {humanbytes(recv)} | **Out:** {humanbytes(sent)}\n"
                     f"**Ram:** {mem}% | **Uptime:** {uptime_str}\n\n"

@@ -1,0 +1,14 @@
+config.json
+.env
+*.session
+*.session-journal
+bot.log*
+restart.json
+eval.txt
+thumbnails/
+*.mkv
+*.mp4
+*.avi
+*.ts
+__pycache__/
+*.py[cod]

@@ -25,8 +25,8 @@ def time_formatter(milliseconds: int) -> str:
     return compact_time(milliseconds / 1000)
 
 def make_bar(percent):
-    done = int(percent / 100 * 15)
-    return "▣" * done + "□" * (15 - done)
+    done = int(percent / 100 * 10)
+    return "▣" * done + "□" * (10 - done)
 
 def render_active_status(percent, done_str, total_str, eta_str, speed_str, elapsed_str, display_status=None):
     cpu, mem, disk = get_sys_stats()
@@ -44,7 +44,7 @@ def render_active_status(percent, done_str, total_str, eta_str, speed_str, elaps
         f"**Processed:** {done_str} of {total_str}\n"
         f"**Status:** {status_text} | **ETA:** {eta_str}\n"
         f"**Speed:** {speed_str}/s | **Elapsed:** {elapsed_str}\n\n"
-        f"**🖥 Hardware Info:**\n"
+        f"🔰 <b><u>Hardware Info:</u></b> 🔰\n"
         f"**CPU:** {cpu}% | **Free:** {free_disk_gb}GB ({100-disk}%)\n"
         f"**In:** {humanbytes(net.bytes_recv)} | **Out:** {humanbytes(net.bytes_sent)}\n"
         f"**Ram:** {mem}% | **Uptime:** {uptime_str}\n\n"

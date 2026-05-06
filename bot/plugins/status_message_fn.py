@@ -42,7 +42,7 @@ async def status_cmd(client, message):
             f"**🌐 Bᴏᴛ Sᴛᴀᴛɪsᴛɪᴄs 🌐**\n\n"
             f"**Status:** Idle\n\n"
             f"**📥 Files in Queue:** {queue.qsize()}\n\n"
-            f"**🖥 Hardware Info:**\n"
+            f"🔰 <b><u>Hardware Info:</u></b> 🔰\n"
             f"**CPU:** {cpu}% | **Free:** {free_disk_gb}GB ({100-disk}%)\n"
             f"**In:** {humanbytes(recv)} | **Out:** {humanbytes(sent)}\n"
             f"**Ram:** {mem}% | **Uptime:** {uptime_str}\n\n"
