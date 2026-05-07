@@ -3,3 +3,4 @@ TgCrypto-pyrofork
 httpx
 psutil
 speedtest-cli
+ujson
