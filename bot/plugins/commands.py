@@ -669,8 +669,16 @@ def run_speedtest():
     return st.results.dict()
 
 async def aexec(code, client, message):
-    exec(f"async def __aexec(client, message): " + "".join(f"\n {l}" for l in code.split("\n")))
-    return await locals()["__aexec"](client, message)
+    exec_vars = {}
+    # Safely wrap user code inside the async function block with proper indentation
+    code_lines = "\n".join([f"    {line}" for line in code.split("\n")])
+    exec_code = f"async def __aexec(client, message):\n{code_lines}"
+    
+    # Execute the function definition explicitly into exec_vars dictionary
+    exec(exec_code, globals(), exec_vars)
+    
+    # Call the dynamically generated function
+    return await exec_vars["__aexec"](client, message)
 
 @bot_app.on_message(filters.command(["eval", "exec"]))
 async def eval_handler(client, message):
