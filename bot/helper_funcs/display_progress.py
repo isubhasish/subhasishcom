@@ -86,7 +86,7 @@ async def progress_bar(current, total, status_text, message, start_time, last_up
             f"🖥 CPU: {cpu}% | 💽 RAM: {mem}%"
         )
         
-        btn = InlineKeyboardMarkup([[InlineKeyboardButton("🛑 Cancel Task 🔴", callback_data="cancel_running")]])
+        btn = InlineKeyboardMarkup([[InlineKeyboardButton("🛑 Cancel Task", callback_data="cancel_running", style="danger")]])
         
         try:
             await message.edit(text, reply_markup=btn)

@@ -55,8 +55,8 @@ async def incoming_media(client, message):
     AppState.pending_tasks[tid] = {"msg": message, "name": file_name}
 
     btn = InlineKeyboardMarkup([
-        [InlineKeyboardButton("▶️ ᴄᴏᴍᴘʀᴇss 🟢", callback_data=f"panel_all_{tid}"), InlineKeyboardButton("🎞 sᴇʟᴇᴄᴛ sᴛʀᴇᴀᴍ 🔵", callback_data=f"panel_select_{tid}")],
-        [InlineKeyboardButton("📊 ᴍᴇᴅɪᴀɪɴғᴏ 🟡", callback_data=f"panel_info_{tid}"), InlineKeyboardButton("❌ ᴄʟᴏsᴇ 🔴", callback_data=f"panel_close_{tid}")]
+        [InlineKeyboardButton("▶️ ᴄᴏᴍᴘʀᴇss ▶️", callback_data=f"panel_all_{tid}", style="success"), InlineKeyboardButton("🎞 sᴇʟᴇᴄᴛ sᴛʀᴇᴀᴍ 🎞", callback_data=f"panel_select_{tid}", style="primary")],
+        [InlineKeyboardButton("📊 ᴍᴇᴅɪᴀɪɴғᴏ 📊", callback_data=f"panel_info_{tid}", style="primary"), InlineKeyboardButton("❌ ᴄʟᴏsᴇ ❌", callback_data=f"panel_close_{tid}", style="danger")]
     ])
     
     await message.reply(

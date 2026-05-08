@@ -316,7 +316,7 @@ async def worker():
                 async with AppState.process_lock:
                     AppState.current_process = process
                 last_update_time = time.time() - 10 
-                btn = InlineKeyboardMarkup([[InlineKeyboardButton("🛑 Cancel Task 🔴", callback_data="cancel_running")]])
+                btn = InlineKeyboardMarkup([[InlineKeyboardButton("🛑 Cancel Task", callback_data="cancel_running", style="danger")]])
 
                 while True:
                     if AppState.cancel_task:
