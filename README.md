@@ -46,7 +46,7 @@ cd aiencoder
 ```
 Build and Run the Bot.
 ```sh
-sudo docker-compose up -d --build
+sudo docker-compose pull && sudo docker-compose up -d --build
 ```
 
 ------
@@ -74,7 +74,7 @@ git pull
 ```
 - Run Again The Advanced Build Command Like Before After Github Is Updated Our Folder/Files.
 ```
-sudo docker-compose up -d --build
+sudo docker-compose pull && sudo docker-compose up -d --build
 ```
 
 ------
@@ -124,6 +124,8 @@ cd backup
 apt install docker-compose
 ```
 ```
+docker-compose pull
+```
 docker-compose up --build
 ```
 ------
@@ -159,7 +161,7 @@ sudo docker system prune -a -f
 ### Bot Father Setting Commands:
 ```
 start - Start The Bot 🤖
-ping - Check Bot's Up Time ⏰
+ping - Check Bot's Up Time & Last Updated Status. ⏰
 status - Check the active compression, queue, and server Hardware
 clear - Clear Your Queued Tasks 🔫
 help - For Getting Help 🤔
