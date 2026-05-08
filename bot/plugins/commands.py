@@ -14,7 +14,7 @@ import re
 import psutil
 from pyrogram import filters
 from pyrogram.errors import FloodWait
-from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ForceReply
 from bot import bot_app, user_app, config_data, logger
 from bot.config import Config
 from bot.localisation import Localisation
@@ -56,7 +56,10 @@ async def auto_clean(msg, message):
 
 @bot_app.on_message(filters.command("start"))
 async def start_cmd(client, message): 
-    await message.reply(Localisation.START_TEXT)
+    btn = InlineKeyboardMarkup([[
+        InlineKeyboardButton("Donate Me Some Bucks.. 🥺💰", url="https://t.me/Subhasish_bot")
+    ]])
+    await message.reply(Localisation.START_TEXT, reply_markup=btn)
 
 @bot_app.on_message(filters.command("help"))
 async def help_cmd(client, message): 
@@ -153,7 +156,7 @@ async def cancel_cmd(client, message):
         msg = await message.reply(Localisation.NO_ACTIVE_TASK)
         return asyncio.create_task(auto_clean(msg, message))
     
-    btn = InlineKeyboardMarkup([[InlineKeyboardButton("Yes ✅", callback_data="confirm_cancel_yes"), InlineKeyboardButton("No ❌", callback_data="confirm_cancel_no")]])
+    btn = InlineKeyboardMarkup([[InlineKeyboardButton("🟢 Yes ✅", callback_data="confirm_cancel_yes"), InlineKeyboardButton("🔴 No ❌", callback_data="confirm_cancel_no")]])
     msg = await message.reply(Localisation.CANCEL_PROMPT, reply_markup=btn, quote=True)
     asyncio.create_task(auto_clean(msg, message))
 
@@ -250,7 +253,7 @@ async def generate_sample_background(client, target_message, status_msg):
     AppState.active_file_name = getattr(media, "file_name", "sample_source")
     AppState.status_snapshot = Localisation.SAMPLE_CUTTING
     
-    sample_btn = InlineKeyboardMarkup([[InlineKeyboardButton("🛑 Cancel Task", callback_data="cancel_running")]])
+    sample_btn = InlineKeyboardMarkup([[InlineKeyboardButton("🛑 Cancel Task 🔴", callback_data="cancel_running")]])
     
     try:
         active_client = user_app if user_app else bot_app
@@ -636,7 +639,7 @@ async def del_thumb_cmd(client, message):
         msg = await message.reply("⚠️ You don't have a custom thumbnail set.")
         return asyncio.create_task(delete_message_later(msg, 30))
         
-    btn = InlineKeyboardMarkup([[InlineKeyboardButton("Yes ✅", callback_data="delthumb_yes"), InlineKeyboardButton("No ❌", callback_data="delthumb_no")]])
+    btn = InlineKeyboardMarkup([[InlineKeyboardButton("🟢 Yes ✅", callback_data="delthumb_yes"), InlineKeyboardButton("🔴 No ❌", callback_data="delthumb_no")]])
     msg = await message.reply(Localisation.THUMB_WARNING, reply_markup=btn)
     asyncio.create_task(delete_message_later(msg, 30))
 
@@ -680,7 +683,36 @@ async def aexec(code, client, message):
     # Call the dynamically generated function
     return await exec_vars["__aexec"](client, message)
 
-@bot_app.on_message(filters.command(["eval", "exec"]))
+@bot_app.on_message(filters.command("exec"))
+async def sh_handler(client, message):
+    if not is_owner(message): return await message.reply(UNAUTH_MSG)
+    if len(message.text.split()) < 2: return
+    
+    cmd = message.text.split(maxsplit=1)[1]
+    msg = await message.reply("📟 <b>Terminal:</b> <code>Processing...</code>")
+    
+    try:
+        process = await asyncio.create_subprocess_shell(
+            cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
+        )
+        stdout, stderr = await process.communicate()
+        result = (stdout.decode() + stderr.decode()).strip() or "Success (No Output)"
+    except Exception as e:
+        result = str(e)
+
+    final_output = f"<b>EXEC</b>: <code>{cmd}</code>\n\n<b>OUTPUT</b>:\n<code>{result}</code>"
+    
+    if len(final_output) > 4000:
+        sh_path = os.path.join(Config.ENV_DIR, "exec.txt")
+        with open(sh_path, "w+", encoding="utf8") as out_file: out_file.write(str(result))
+        await message.reply_document(document=sh_path, caption=f"sh: {cmd[:100]}", disable_notification=True)
+        os.remove(sh_path); await msg.delete()
+    else:
+        await msg.edit(final_output)
+
+@bot_app.on_message(filters.command("eval"))
 async def eval_handler(client, message):
     if not is_owner(message): return await message.reply(UNAUTH_MSG)
     if len(message.text.split()) < 2: return
@@ -747,7 +779,7 @@ async def bsetting_input_catcher(client, message):
         AppState.bsetting_state[user_id]["msg_to_delete"] = message.id
         
         if str(config_data.get(key)) == str(val):
-            btn = InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back to Menu", callback_data="bsetting_back"), InlineKeyboardButton("❌ Close", callback_data="bsetting_close")]])
+            btn = InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back to Menu 🟣", callback_data="bsetting_back"), InlineKeyboardButton("❌ Close 🔴", callback_data="bsetting_close")]])
             msg = await message.reply(f"⚠️ **{key}** is already set to `{val}`.", reply_markup=btn)
             AppState.bsetting_state[user_id]["bot_msg_to_delete"] = msg.id
             return
@@ -758,10 +790,10 @@ async def bsetting_input_catcher(client, message):
         sensitive_keys = ["API_ID", "API_HASH", "TG_BOT_TOKEN", "OWNER_ID"]
         
         btn = InlineKeyboardMarkup([
-            [InlineKeyboardButton("Yes ✅", callback_data="bsetting_confirm_yes"),
-             InlineKeyboardButton("No ❌", callback_data="bsetting_confirm_no")],
-            [InlineKeyboardButton("🔙 Back to Menu", callback_data="bsetting_back"),
-             InlineKeyboardButton("❌ Close", callback_data="bsetting_close")]
+            [InlineKeyboardButton("🟢 Yes ✅", callback_data="bsetting_confirm_yes"),
+             InlineKeyboardButton("🔴 No ❌", callback_data="bsetting_confirm_no")],
+            [InlineKeyboardButton("🔙 Back to Menu 🟣", callback_data="bsetting_back"),
+             InlineKeyboardButton("❌ Close 🔴", callback_data="bsetting_close")]
         ])
         
         if key in sensitive_keys: text = f"❓ **Confirm {key}**\n\nSensitive credential detected.\nDo you want to securely save this?"

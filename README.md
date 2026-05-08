@@ -126,6 +126,7 @@ apt install docker-compose
 ```
 docker-compose pull
 ```
+```
 docker-compose up --build
 ```
 ------
