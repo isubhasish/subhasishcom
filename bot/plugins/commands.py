@@ -12,7 +12,6 @@ import gc
 import speedtest
 import re 
 import psutil
-from pyrogram.enums import ButtonStyle
 from pyrogram import filters
 from pyrogram.errors import FloodWait
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ForceReply
@@ -58,7 +57,7 @@ async def auto_clean(msg, message):
 @bot_app.on_message(filters.command("start"))
 async def start_cmd(client, message): 
     btn = InlineKeyboardMarkup([[
-        InlineKeyboardButton("Donate Me Some Bucks.. 🥺💰", url="https://t.me/Subhasish_bot", style=ButtonStyle.SUCCESS)
+        InlineKeyboardButton("Donate Me Some Bucks.. 🥺💰", url="https://t.me/Subhasish_bot")
     ]])
     await message.reply(Localisation.START_TEXT, reply_markup=btn)
 
@@ -157,7 +156,7 @@ async def cancel_cmd(client, message):
         msg = await message.reply(Localisation.NO_ACTIVE_TASK)
         return asyncio.create_task(auto_clean(msg, message))
     
-    btn = InlineKeyboardMarkup([[InlineKeyboardButton("Yes ✅", callback_data="confirm_cancel_yes", style=ButtonStyle.SUCCESS), InlineKeyboardButton("No ❌", callback_data="confirm_cancel_no", style=ButtonStyle.DANGER)]])
+    btn = InlineKeyboardMarkup([[InlineKeyboardButton("Yes ✅", callback_data="confirm_cancel_yes"), InlineKeyboardButton("No ❌", callback_data="confirm_cancel_no")]])
     msg = await message.reply(Localisation.CANCEL_PROMPT, reply_markup=btn, quote=True)
     asyncio.create_task(auto_clean(msg, message))
 
@@ -254,7 +253,7 @@ async def generate_sample_background(client, target_message, status_msg):
     AppState.active_file_name = getattr(media, "file_name", "sample_source")
     AppState.status_snapshot = Localisation.SAMPLE_CUTTING
     
-    sample_btn = InlineKeyboardMarkup([[InlineKeyboardButton("🛑 Cancel Task", callback_data="cancel_running", style=ButtonStyle.DANGER)]])
+    sample_btn = InlineKeyboardMarkup([[InlineKeyboardButton("🛑 Cancel Task", callback_data="cancel_running")]])
     
     try:
         active_client = user_app if user_app else bot_app
@@ -640,7 +639,7 @@ async def del_thumb_cmd(client, message):
         msg = await message.reply("⚠️ You don't have a custom thumbnail set.")
         return asyncio.create_task(delete_message_later(msg, 30))
         
-    btn = InlineKeyboardMarkup([[InlineKeyboardButton("Yes ✅", callback_data="delthumb_yes", style=ButtonStyle.SUCCESS), InlineKeyboardButton("No ❌", callback_data="delthumb_no", style=ButtonStyle.DANGER)]])
+    btn = InlineKeyboardMarkup([[InlineKeyboardButton("Yes ✅", callback_data="delthumb_yes"), InlineKeyboardButton("No ❌", callback_data="delthumb_no")]])
     msg = await message.reply(Localisation.THUMB_WARNING, reply_markup=btn)
     asyncio.create_task(delete_message_later(msg, 30))
 
@@ -778,7 +777,7 @@ async def bsetting_input_catcher(client, message):
         AppState.bsetting_state[user_id]["msg_to_delete"] = message.id
         
         if str(config_data.get(key)) == str(val):
-            btn = InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back to Menu", callback_data="bsetting_back", style=ButtonStyle.PRIMARY), InlineKeyboardButton("❌ Close", callback_data="bsetting_close", style=ButtonStyle.DANGER)]])
+            btn = InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back to Menu", callback_data="bsetting_back"), InlineKeyboardButton("❌ Close", callback_data="bsetting_close")]])
             msg = await message.reply(f"⚠️ **{key}** is already set to `{val}`.", reply_markup=btn)
             AppState.bsetting_state[user_id]["bot_msg_to_delete"] = msg.id
             return
@@ -789,10 +788,10 @@ async def bsetting_input_catcher(client, message):
         sensitive_keys = ["API_ID", "API_HASH", "TG_BOT_TOKEN", "OWNER_ID"]
         
         btn = InlineKeyboardMarkup([
-            [InlineKeyboardButton("Yes ✅", callback_data="bsetting_confirm_yes", style=ButtonStyle.SUCCESS),
-             InlineKeyboardButton("No ❌", callback_data="bsetting_confirm_no", style=ButtonStyle.DANGER)],
-            [InlineKeyboardButton("🔙 Back to Menu", callback_data="bsetting_back", style=ButtonStyle.PRIMARY),
-             InlineKeyboardButton("❌ Close", callback_data="bsetting_close", style=ButtonStyle.DANGER)]
+            [InlineKeyboardButton("Yes ✅", callback_data="bsetting_confirm_yes"),
+             InlineKeyboardButton("No ❌", callback_data="bsetting_confirm_no")],
+            [InlineKeyboardButton("🔙 Back to Menu", callback_data="bsetting_back"),
+             InlineKeyboardButton("❌ Close", callback_data="bsetting_close")]
         ])
         
         if key in sensitive_keys: text = f"❓ **Confirm {key}**\n\nSensitive credential detected.\nDo you want to securely save this?"

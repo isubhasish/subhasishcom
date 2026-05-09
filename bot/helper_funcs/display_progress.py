@@ -2,7 +2,6 @@ import time
 import os
 import math
 import asyncio
-from pyrogram.enums import ButtonStyle
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from bot.helper_funcs.utils import AppState, get_sys_stats, START_TIME, get_readable_time
 
@@ -87,7 +86,7 @@ async def progress_bar(current, total, status_text, message, start_time, last_up
             f"🖥 CPU: {cpu}% | 💽 RAM: {mem}%"
         )
         
-        btn = InlineKeyboardMarkup([[InlineKeyboardButton("🛑 Cancel Task", callback_data="cancel_running", style=ButtonStyle.DANGER)]])
+        btn = InlineKeyboardMarkup([[InlineKeyboardButton("🛑 Cancel Task", callback_data="cancel_running")]])
         
         try:
             await message.edit(text, reply_markup=btn)

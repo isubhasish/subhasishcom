@@ -6,7 +6,6 @@ import traceback
 import signal
 import socket
 from datetime import datetime, timezone, timedelta
-from pyrogram.enums import ButtonStyle
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from bot import bot_app, user_app, logger, config_data
 from bot.config import Config
@@ -317,7 +316,7 @@ async def worker():
                 async with AppState.process_lock:
                     AppState.current_process = process
                 last_update_time = time.time() - 10 
-                btn = InlineKeyboardMarkup([[InlineKeyboardButton("🛑 Cancel Task", callback_data="cancel_running", style=ButtonStyle.DANGER)]])
+                btn = InlineKeyboardMarkup([[InlineKeyboardButton("🛑 Cancel Task", callback_data="cancel_running")]])
 
                 while True:
                     if AppState.cancel_task:
