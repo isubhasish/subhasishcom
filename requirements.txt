@@ -1,4 +1,4 @@
-pyrofork
+kurigram
 TgCrypto-pyrofork
 httpx
 psutil

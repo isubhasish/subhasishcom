@@ -1,7 +1,7 @@
 import os
 import json
 from pyrogram import filters
-from pyrogram.enums import ChatType
+from pyrogram.enums import ChatType, ButtonStyle
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from bot import bot_app, config_data
 from bot.helper_funcs.utils import queue, AppState, get_file_info
@@ -55,8 +55,8 @@ async def incoming_media(client, message):
     AppState.pending_tasks[tid] = {"msg": message, "name": file_name}
 
     btn = InlineKeyboardMarkup([
-        [InlineKeyboardButton("▶️ ᴄᴏᴍᴘʀᴇss ▶️", callback_data=f"panel_all_{tid}"), InlineKeyboardButton("🎞 sᴇʟᴇᴄᴛ sᴛʀᴇᴀᴍ 🎞", callback_data=f"panel_select_{tid}")],
-        [InlineKeyboardButton("📊 ᴍᴇᴅɪᴀɪɴғᴏ 📊", callback_data=f"panel_info_{tid}"), InlineKeyboardButton("❌ ᴄʟᴏsᴇ ❌", callback_data=f"panel_close_{tid}")]
+        [InlineKeyboardButton("▶️ ᴄᴏᴍᴘʀᴇss ▶️", callback_data=f"panel_all_{tid}", style=ButtonStyle.SUCCESS), InlineKeyboardButton("🎞 sᴇʟᴇᴄᴛ sᴛʀᴇᴀᴍ 🎞", callback_data=f"panel_select_{tid}", style=ButtonStyle.PRIMARY)],
+        [InlineKeyboardButton("📊 ᴍᴇᴅɪᴀɪɴғᴏ 📊", callback_data=f"panel_info_{tid}", style=ButtonStyle.PRIMARY), InlineKeyboardButton("❌ ᴄʟᴏsᴇ ❌", callback_data=f"panel_close_{tid}", style=ButtonStyle.DANGER)]
     ])
     
     await message.reply(
