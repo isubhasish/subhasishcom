@@ -15,7 +15,7 @@ import psutil
 import html
 from pyrogram.enums import ButtonStyle
 from pyrogram import filters
-from pyrogram.errors import FloodWait
+from pyrogram.errors import FloodWait, MessageNotModified
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ForceReply, ReplyParameters
 from bot import bot_app, user_app, config_data, logger
 from bot.config import Config
@@ -27,16 +27,43 @@ from bot.plugins.call_back_button_handler import get_bsetting_menu
 from bot.helper_funcs.ffmpeg import abort_current_task, take_screen_shot, start_tg_http_proxy, _find_free_port
 
 UNAUTH_MSG = "<b>You are not allowed to do that 🤭</b>"
+SPEEDTEST_LOCK = asyncio.Lock()
+BACKGROUND_TASKS = set()
+
+def _cleanup_task(task):
+    BACKGROUND_TASKS.discard(task)
+    try:
+        exc = task.exception()
+        if exc:
+            logger.error(f"Background task failed: {exc}", exc_info=exc)
+    except asyncio.CancelledError:
+        pass
+
+def spawn_task(coro, max_timeout=3600):
+    async def watchdog():
+        try:
+            await asyncio.wait_for(coro, timeout=max_timeout)
+        except asyncio.TimeoutError:
+            logger.warning("A background task was safely terminated after reaching the 1-hour limit.")
+        except asyncio.CancelledError:
+            pass
+            
+    task = asyncio.create_task(watchdog())
+    BACKGROUND_TASKS.add(task)
+    task.add_done_callback(_cleanup_task)
+    return task
 
 def is_sudo(message):
     user_id = message.from_user.id if message.from_user else 0
-    chat_id = message.chat.id
     auth_users = config_data.get("AUTH_USERS", [])
     owner_id = config_data.get("OWNER_ID", 0)
     
     if isinstance(auth_users, str):
         try: auth_users = json.loads(auth_users)
         except Exception: auth_users = []
+        
+    if not isinstance(auth_users, list):
+        auth_users = [auth_users] if auth_users else []
         
     return user_id in auth_users or user_id == owner_id
 
@@ -54,7 +81,7 @@ async def auto_clean(msg, message):
         try:
             await msg.delete()
             await message.delete()
-        except: pass
+        except Exception: pass
 
 @bot_app.on_message(filters.command("start"))
 async def start_cmd(client, message): 
@@ -75,7 +102,7 @@ async def help_cmd(client, message):
         Localisation.HELP_TEXT,
         reply_parameters=ReplyParameters(message_id=message.id)
     )
-    asyncio.create_task(auto_clean(msg, message))
+    spawn_task(auto_clean(msg, message))
 
 @bot_app.on_message(filters.command("ping"))
 async def ping_cmd(client, message):
@@ -113,8 +140,8 @@ async def ping_cmd(client, message):
     if git_info:
         text += f"\n\n{git_info}"
         
-    await msg.edit(text)
-    asyncio.create_task(auto_clean(msg, message))
+    await msg.edit_text(text)
+    spawn_task(auto_clean(msg, message))
 
 @bot_app.on_message(filters.command("settings"))
 async def settings_cmd(client, message):
@@ -138,15 +165,15 @@ async def update_setting(message, key, display_name):
         return await bot_app.send_message(message.chat.id, UNAUTH_MSG, reply_parameters=ReplyParameters(message_id=message.id))
     if len(message.command) < 2: 
         msg = await bot_app.send_message(message.chat.id, f"Current {display_name}: `{config_data.get(key)}`", reply_parameters=ReplyParameters(message_id=message.id))
-        return asyncio.create_task(auto_clean(msg, message))
+        return spawn_task(auto_clean(msg, message))
     val = message.command[1]
     if str(config_data.get(key)) == str(val): 
         msg = await bot_app.send_message(message.chat.id, f"⚠️ {display_name} is already set to `{val}`", reply_parameters=ReplyParameters(message_id=message.id))
-        return asyncio.create_task(auto_clean(msg, message))
+        return spawn_task(auto_clean(msg, message))
     config_data[key] = val
     Config.save_config(config_data)
     msg = await bot_app.send_message(message.chat.id, f"✅ {display_name} successfully updated to `{val}`.", reply_parameters=ReplyParameters(message_id=message.id))
-    asyncio.create_task(auto_clean(msg, message))
+    spawn_task(auto_clean(msg, message))
 
 @bot_app.on_message(filters.command("preset"))
 async def preset_cmd(client, message): await update_setting(message, "PRESET", "preset")
@@ -173,7 +200,7 @@ async def clear_cmd(client, message):
             queue.task_done()
             
     msg = await bot_app.send_message(message.chat.id, Localisation.QUEUE_CLEARED, reply_parameters=ReplyParameters(message_id=message.id))
-    asyncio.create_task(auto_clean(msg, message))
+    spawn_task(auto_clean(msg, message))
 
 @bot_app.on_message(filters.command("cancel"))
 async def cancel_cmd(client, message):
@@ -181,7 +208,7 @@ async def cancel_cmd(client, message):
         return await bot_app.send_message(message.chat.id, UNAUTH_MSG, reply_parameters=ReplyParameters(message_id=message.id))
     if AppState.task_state == TaskState.IDLE: 
         msg = await bot_app.send_message(message.chat.id, Localisation.NO_ACTIVE_TASK, reply_parameters=ReplyParameters(message_id=message.id))
-        return asyncio.create_task(auto_clean(msg, message))
+        return spawn_task(auto_clean(msg, message))
     
     btn = InlineKeyboardMarkup([[InlineKeyboardButton("Yes ✅", callback_data="confirm_cancel_yes", style=ButtonStyle.SUCCESS), InlineKeyboardButton("No ❌", callback_data="confirm_cancel_no", style=ButtonStyle.DANGER)]])
     
@@ -191,7 +218,7 @@ async def cancel_cmd(client, message):
         reply_markup=btn, 
         reply_parameters=ReplyParameters(message_id=message.id)
     )
-    asyncio.create_task(auto_clean(msg, message))
+    spawn_task(auto_clean(msg, message))
 
 @bot_app.on_message(filters.command("log"))
 async def log_cmd(client, message):
@@ -200,17 +227,17 @@ async def log_cmd(client, message):
     msg = await bot_app.send_message(message.chat.id, "⏳ Fetching bot logs...", reply_parameters=ReplyParameters(message_id=message.id))
     try:
         log_path = os.path.join(Config.ENV_DIR, "bot.log")
-        if not os.path.exists(log_path): return await msg.edit("⚠️ Log file is empty or not yet created.")
+        if not os.path.exists(log_path): return await msg.edit_text("⚠️ Log file is empty or not yet created.")
         
         with open(log_path, "r") as f: log_data = f.read()[-30000:] 
-        if not log_data: return await msg.edit("⚠️ Log file is empty.")
+        if not log_data: return await msg.edit_text("⚠️ Log file is empty.")
         
         content_json = []
         content_json.append({"tag": "pre", "children": [log_data]})
         
         link = await get_graph_link(content_json, "Subhasish Encoder Logs", "Subhasish Encoder")
-        await msg.edit(f"📝 **Bot Logs:**\n{link}")
-    except Exception as e: await msg.edit(f"❌ Failed to fetch logs: {e}")
+        await msg.edit_text(f"📝 **Bot Logs:**\n{link}")
+    except Exception as e: await msg.edit_text(f"❌ Failed to fetch logs: {e}")
 
 @bot_app.on_message(filters.command("mediainfo"))
 async def mediainfo_cmd(client, message):
@@ -224,7 +251,7 @@ async def mediainfo_cmd(client, message):
     try:
         active_client = user_app if user_app else bot_app
         real_path = await active_client.download_media(message.reply_to_message)
-        if not real_path or not os.path.exists(real_path): return await msg.edit("❌ Failed to download file for probing.")
+        if not real_path or not os.path.exists(real_path): return await msg.edit_text("❌ Failed to download file for probing.")
             
         process = await asyncio.create_subprocess_exec(
             "mediainfo", real_path,
@@ -234,7 +261,7 @@ async def mediainfo_cmd(client, message):
         try: stdout, _ = await asyncio.wait_for(process.communicate(), timeout=30)
         except asyncio.TimeoutError:
             try: os.killpg(os.getpgid(process.pid), signal.SIGKILL)
-            except: pass
+            except Exception: pass
             raise Exception("MediaInfo Process Timed Out")
             
         raw_info = stdout.decode('utf-8').strip()
@@ -267,10 +294,35 @@ async def mediainfo_cmd(client, message):
         if current_pre: content_json.append({"tag": "pre", "children": [current_pre]})
             
         link = await get_graph_link(content_json, "Subhasish Encoder Mediainfo", "Subhasish Encoder")
-        await msg.edit(f"📊 **MediaInfo Link:**\n{link}")
+        await msg.edit_text(f"📊 **MediaInfo Link:**\n{link}")
     except Exception as e:
-        await msg.edit(f"❌ Error: {e}")
+        await msg.edit_text(f"❌ Error: {e}")
         if real_path and os.path.exists(real_path): os.remove(real_path)
+
+async def safe_edit(msg, text, **kwargs):
+    try:
+        await msg.edit_text(text, **kwargs)
+    except MessageNotModified:
+        pass
+    except FloodWait as e:
+        wait_time = getattr(e, "value", getattr(e, "x", 5))
+        await asyncio.sleep(wait_time)
+        try: 
+            await msg.edit_text(text, **kwargs)
+        except MessageNotModified: 
+            pass
+        except Exception as e: 
+            error_str = str(e).upper()
+            if "MESSAGE_ID_INVALID" in error_str or "DELETED" in error_str:
+                pass
+            else:
+                logger.exception(f"safe_edit recovery failed: {e}")
+    except Exception as e:
+        error_str = str(e).upper()
+        if "MESSAGE_ID_INVALID" in error_str or "DELETED" in error_str:
+            pass
+        else:
+            logger.exception(f"safe_edit initial edit failed: {e}")
 
 async def generate_sample_background(client, target_message, status_msg):
     probe_path: str | None = None
@@ -296,14 +348,15 @@ async def generate_sample_background(client, target_message, status_msg):
     try:
         active_client = user_app if user_app else bot_app
         if not media:
-            return await status_msg.edit("⚠️ No media found on this message.")
+            await safe_edit(status_msg, "⚠️ No media found on this message.")
+            return          
         file_size: int = media.file_size or 0
 
         # ---------- RESOLVE DURATION ----------
         total_duration = float(getattr(media, "duration", 0) or 0)
         
         if total_duration < 1.0:
-            await status_msg.edit(Localisation.SAMPLE_PROBING, reply_markup=sample_btn)
+            await safe_edit(status_msg, Localisation.SAMPLE_PROBING, reply_markup=sample_btn)
             probe_path = f"/tmp/probe_{uuid.uuid4().hex[:10]}.mkv"
             with open(probe_path, "wb") as pf:
                 async for chunk in active_client.stream_media(target_message, limit=8):
@@ -332,19 +385,21 @@ async def generate_sample_background(client, target_message, status_msg):
             try: total_duration = float(probe_stdout.decode("utf-8").strip())
             except (ValueError, TypeError): total_duration = 0.0
         else:
-            await status_msg.edit(
-                "⚡️ **Fast Sample Mode Active**\n"
-                "📡 Duration from metadata — probe step skipped!\n",
-                reply_markup=sample_btn,
+            await safe_edit(
+                status_msg, 
+                "⚡️ **Fast Sample Mode Active**\n📡 Duration from metadata — probe step skipped!\n",
+                reply_markup=sample_btn
             )
 
         SAMPLE_DURATION = 30
         MIN_LEN = SAMPLE_DURATION + 15
         
         if total_duration < MIN_LEN:
-            return await status_msg.edit(
+            await safe_edit(
+                status_msg, 
                 f"❎**ᴠɪᴅᴇᴏ ɪs ᴛᴏᴏ sʜᴏʀᴛ ᴛᴏ ɢᴇɴᴇʀᴀᴛᴇ ᴀ** `{SAMPLE_DURATION}s` **sᴀᴍᴘʟᴇ, ʏᴏᴜ ɴᴇᴇᴅ ᴀᴛ ʟᴇᴀsᴛ** `{MIN_LEN}s` **ᴛɪᴍᴇ ғᴏʀ ᴛʜɪs** `{int(total_duration)}s` **ᴅᴜʀᴀᴛɪᴏɴ ᴠɪᴅᴇᴏ, ᴜsᴇ ᴀɴᴏᴛʜᴇʀ ᴠɪᴅᴇᴏ.**❎"
             )
+            return
             
         if AppState.cancel_task: raise asyncio.CancelledError()
 
@@ -443,26 +498,14 @@ async def generate_sample_background(client, target_message, status_msg):
                     f"**🏷 Maintained By: @Subhasish_bot**"
                 )
                 
-                try: await status_msg.edit(primary_text, reply_markup=sample_btn)
-                except Exception: pass
+                await safe_edit(status_msg, primary_text, reply_markup=sample_btn)
                 AppState.status_snapshot = secondary_text
                 
             if time.time() - wait_start > MAX_WAIT_SEC:
-                try:
-                    os.killpg(os.getpgid(cut_proc.pid), signal.SIGKILL)
-                except Exception:
-                    pass
-                try:
-                    return await status_msg.edit(
-                        "⚠️ Sample cut timed out.\n"
-                        "The HTTP seek may have stalled — please try again."
-                    )
-                except FloodWait as e:
-                    await asyncio.sleep(e.value)
-                    try: return await status_msg.edit("⚠️ Sample cut timed out.\nThe HTTP seek may have stalled — please try again.")
-                    except: pass
-                except Exception:
-                    pass
+                try: os.killpg(os.getpgid(cut_proc.pid), signal.SIGKILL)
+                except Exception: pass
+                
+                await safe_edit(status_msg, "⚠️ Sample cut timed out.\nThe HTTP seek may have stalled — please try again.")
                 return
                 
             await asyncio.sleep(0.5)
@@ -484,14 +527,7 @@ async def generate_sample_background(client, target_message, status_msg):
         gen_elapsed = int(time.time() - gen_start)
             
         if not os.path.exists(sample_out) or os.path.getsize(sample_out) < 4096:
-            try:
-                return await status_msg.edit("⚠️ Sample output is empty or corrupt. Please try again.")
-            except FloodWait as e:
-                await asyncio.sleep(e.value)
-                try: return await status_msg.edit("⚠️ Sample output is empty or corrupt. Please try again.")
-                except: pass
-            except Exception:
-                pass
+            await safe_edit(status_msg, "⚠️ Sample output is empty or corrupt. Please try again.")
             return
 
         # ---------- THUMBNAIL GENERATION ----------
@@ -529,14 +565,7 @@ async def generate_sample_background(client, target_message, status_msg):
         if secondary_text:
             AppState.status_snapshot = secondary_text.replace("Sample Generating", current_phase)
             
-        try:
-            await status_msg.edit(Localisation.SAMPLE_UPLOADING, reply_markup=sample_btn)
-        except FloodWait as e:
-            await asyncio.sleep(e.value)
-            try: await status_msg.edit(Localisation.SAMPLE_UPLOADING, reply_markup=sample_btn)
-            except: pass
-        except Exception:
-            pass
+        await safe_edit(status_msg, Localisation.SAMPLE_UPLOADING, reply_markup=sample_btn)
         
         caption = (
             f"✅ <b>Successfully Extracted</b> `{SAMPLE_DURATION}s` <b>From {cut_str} Of</b> `{AppState.active_file_name}` <b>In {gen_elapsed} Seconds.</b>\n\n"
@@ -546,19 +575,33 @@ async def generate_sample_background(client, target_message, status_msg):
         upload_start  = time.time()
         last_up_time  = [time.time()]
         
-        await active_client.send_video(
-            chat_id=status_msg.chat.id,
-            video=sample_out,
-            caption=caption,
-            thumb=actual_thumb,
-            width=vid_width,
-            height=vid_height,
-            duration=SAMPLE_DURATION,
-            supports_streaming=True,
-            progress=progress_bar,
-            progress_args=("Uploading", status_msg, upload_start, last_up_time),
-            reply_parameters=ReplyParameters(message_id=target_message.id),
+        upload_task = asyncio.create_task(
+            active_client.send_video(
+                chat_id=status_msg.chat.id,
+                video=sample_out,
+                caption=caption,
+                thumb=actual_thumb,
+                width=vid_width,
+                height=vid_height,
+                duration=SAMPLE_DURATION,
+                supports_streaming=True,
+                progress=progress_bar,
+                progress_args=("Uploading", status_msg, upload_start, last_up_time),
+                reply_parameters=ReplyParameters(message_id=target_message.id),
+            )
         )
+        
+        while not upload_task.done():
+            if AppState.cancel_task:
+                upload_task.cancel()
+                try: 
+                    await asyncio.wait_for(upload_task, timeout=10)
+                except Exception: 
+                    pass
+                raise asyncio.CancelledError("Upload phase cancelled by user")
+            await asyncio.sleep(0.5)
+            
+        await upload_task   
         try: await status_msg.delete()
         except Exception: pass
 
@@ -566,12 +609,7 @@ async def generate_sample_background(client, target_message, status_msg):
         await abort_current_task(status_msg, probe_path, sample_out, chat_id=target_message.chat.id)
     except Exception as e:
         logger.error("[SAMPLEGEN ERROR] %s\n%s", e, traceback.format_exc())
-        try: await status_msg.edit(f"❌ **Sample Generation Error:**\n`{e}`")
-        except FloodWait as fw:
-            await asyncio.sleep(fw.value)
-            try: await status_msg.edit(f"❌ **Sample Generation Error:**\n`{e}`")
-            except: pass
-        except Exception: pass
+        await safe_edit(status_msg, f"❌ **Sample Generation Error:**\n`{e}`")
     finally:
         if proxy_server is not None:
             try:
@@ -617,18 +655,22 @@ async def samplegen_cmd(client, message):
     if not getattr(message.reply_to_message, "video", None) and not getattr(message.reply_to_message, "document", None):
         return await bot_app.send_message(message.chat.id, "⚠️ Please reply to a video or document to generate a sample.", reply_parameters=ReplyParameters(message_id=message.id))
         
+    if getattr(message.reply_to_message, "document", None):
+        mime = message.reply_to_message.document.mime_type
+        if mime and not mime.startswith("video/"):
+            return await bot_app.send_message(message.chat.id, "⚠️ The replied document is not a valid video format! (e.g. zip/pdf)", reply_parameters=ReplyParameters(message_id=message.id))      
     msg = await bot_app.send_message(message.chat.id, "⏳ **Initializing Fast Sample Generator...** 📡\n", reply_parameters=ReplyParameters(message_id=message.id))
-    asyncio.create_task(generate_sample_background(client, message.reply_to_message, msg))
+    spawn_task(generate_sample_background(client, message.reply_to_message, msg))
 
 @bot_app.on_message(filters.command("clearlocals"))
 async def clearlocals_cmd(client, message):
     if not is_sudo(message): 
         return await bot_app.send_message(message.chat.id, UNAUTH_MSG, reply_parameters=ReplyParameters(message_id=message.id))
     try:
-        gc.collect()
-        await bot_app.send_message(message.chat.id, "✅ **Local Execution Variables Cleared!**\nServer RAM has been optimized and flushed.", reply_parameters=ReplyParameters(message_id=message.id))
+        freed = gc.collect()
+        await bot_app.send_message(message.chat.id, f"✅ **Garbage Collection Triggered!**\nFreed `{freed}` unused Python objects from memory.", reply_parameters=ReplyParameters(message_id=message.id))
     except Exception as e:
-        await bot_app.send_message(message.chat.id, f"❌ **Failed to clear locals:** {e}", reply_parameters=ReplyParameters(message_id=message.id))
+        await bot_app.send_message(message.chat.id, f"❌ **Failed to run GC:** {e}", reply_parameters=ReplyParameters(message_id=message.id))
 
 @bot_app.on_message(filters.command("restart"))
 async def restart_cmd(client, message):
@@ -641,14 +683,22 @@ async def restart_cmd(client, message):
             proc = await asyncio.create_subprocess_exec(
                 "git", "pull",
                 stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.STDOUT
+                stderr=asyncio.subprocess.STDOUT,
+                start_new_session=True
             )
             await asyncio.wait_for(proc.communicate(), timeout=30)
+        except asyncio.TimeoutError:
+            try: os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+            except Exception: pass
+            logger.error("Git pull timed out and was killed.")
         except Exception as e:
             logger.error(f"❎ **Oops...!! Failed to load the latest data...** ❎ | Reason: {e}")
             
     restart_path = os.path.join(Config.ENV_DIR, "restart.json")
-    with open(restart_path, "w") as f: json.dump({"chat_id": msg.chat.id, "message_id": msg.id}, f)
+    with open(restart_path, "w") as f: 
+        json.dump({"chat_id": msg.chat.id, "message_id": msg.id}, f)
+        f.flush()
+        os.fsync(f.fileno())
     os.execl(sys.executable, sys.executable, "-m", "bot")
 
 @bot_app.on_message(filters.command("cancelall"))
@@ -669,10 +719,10 @@ async def cancel_all_cmd(client, message):
     
     if AppState.active_status_msg:
         try: await AppState.active_status_msg.delete()
-        except: pass
+        except Exception: pass
         
     msg = await bot_app.send_message(message.chat.id, "⚠️ **ALL TASKS CANCELLED AND QUEUE CLEARED.**", reply_parameters=ReplyParameters(message_id=message.id))
-    asyncio.create_task(delete_message_later(msg, 30))
+    spawn_task(delete_message_later(msg, 30))
 
 @bot_app.on_message(filters.command("setthumbnail"))
 async def set_thumb(client, message):
@@ -692,19 +742,22 @@ async def del_thumb_cmd(client, message):
     path = os.path.join(Config.THUMB_DIR, f"{message.from_user.id}.jpg")
     if not os.path.exists(path): 
         msg = await bot_app.send_message(message.chat.id, "⚠️ You don't have a custom thumbnail set.", reply_parameters=ReplyParameters(message_id=message.id))
-        return asyncio.create_task(delete_message_later(msg, 30))
+        return spawn_task(delete_message_later(msg, 30))
         
     btn = InlineKeyboardMarkup([[InlineKeyboardButton("Yes ✅", callback_data="delthumb_yes", style=ButtonStyle.SUCCESS), InlineKeyboardButton("No ❌", callback_data="delthumb_no", style=ButtonStyle.DANGER)]])
     msg = await bot_app.send_message(message.chat.id, Localisation.THUMB_WARNING, reply_markup=btn, reply_parameters=ReplyParameters(message_id=message.id))
-    asyncio.create_task(delete_message_later(msg, 30))
+    spawn_task(delete_message_later(msg, 30))
 
 @bot_app.on_message(filters.command("speedtest"))
 async def speedtest_cmd(client, message):
     if not is_owner(message): 
-        return await bot_app.send_message(message.chat.id, UNAUTH_MSG, reply_parameters=ReplyParameters(message_id=message.id))
+        return await bot_app.send_message(message.chat.id, UNAUTH_MSG, reply_parameters=ReplyParameters(message_id=message.id)) 
+    if SPEEDTEST_LOCK.locked():
+        return await bot_app.send_message(message.chat.id, "⚠️ A speedtest is already running. Please wait...", reply_parameters=ReplyParameters(message_id=message.id))    
     msg = await bot_app.send_message(message.chat.id, "⏳ **Running Server Speedtest...**\n✨ 𝘛𝘩𝘪𝘴 𝘵𝘢𝘬𝘦𝘴 𝘢𝘣𝘰𝘶𝘵 20 𝘴𝘦𝘤𝘰𝘯𝘥𝘴 ✨", reply_parameters=ReplyParameters(message_id=message.id))
     try:
-        res = await asyncio.to_thread(run_speedtest)
+        async with SPEEDTEST_LOCK:
+            res = await asyncio.to_thread(run_speedtest)       
         d_speed = humanbytes(res['download'] / 8)
         u_speed = humanbytes(res['upload'] / 8)
         ping = res['ping']
@@ -716,9 +769,9 @@ async def speedtest_cmd(client, message):
             f"📶 **ᴘɪɴɢ:** `{ping} ms`\n"
             f"🌍 **sᴇʀᴠᴇʀ:** `{res['server']['name']}, {res['server']['country']}`"
         )
-        await msg.edit(text)
+        await msg.edit_text(text)
     except Exception as e:
-        await msg.edit(f"❌ **Speedtest Failed:** {e}")
+        await msg.edit_text(f"❌ **Speedtest Failed:** {e}")
         
 def run_speedtest():
     st = speedtest.Speedtest(secure=True)
@@ -732,7 +785,7 @@ async def aexec(code, client, message):
     code_lines = "\n".join([f"    {line}" for line in code.split("\n")])
     exec_code = f"async def __aexec(client, message):\n{code_lines}"
     
-    exec(exec_code, globals(), exec_vars)
+    exec(exec_code, globals().copy(), exec_vars)
     
     return await exec_vars["__aexec"](client, message)
 
@@ -749,10 +802,15 @@ async def sh_handler(client, message):
         process = await asyncio.create_subprocess_shell(
             cmd,
             stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE
+            stderr=asyncio.subprocess.PIPE,
+            start_new_session=True
         )
-        stdout, stderr = await process.communicate()
+        stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=120)
         result = (stdout.decode() + stderr.decode()).strip() or "Success (No Output)"
+    except asyncio.TimeoutError:
+        try: os.killpg(os.getpgid(process.pid), signal.SIGKILL)
+        except Exception: pass
+        result = "⚠️ EXEC TIMEOUT: Command ran for over 120 seconds and was killed to protect the event loop."
     except Exception as e:
         result = str(e)
 
@@ -771,7 +829,7 @@ async def sh_handler(client, message):
         )
         os.remove(sh_path); await msg.delete()
     else:
-        await msg.edit(final_output)
+        await msg.edit_text(final_output)
 
 @bot_app.on_message(filters.command("eval"))
 async def eval_handler(client, message):
@@ -788,7 +846,9 @@ async def eval_handler(client, message):
     stdout, stderr, exc = None, None, None
     
     try: 
-        await aexec(cmd, client, message)
+        await asyncio.wait_for(aexec(cmd, client, message), timeout=120)
+    except asyncio.TimeoutError:
+        exc = "⚠️ EVAL TIMEOUT: Code execution exceeded 120 seconds and was forcefully terminated."
     except Exception: 
         exc = traceback.format_exc()
     finally:
@@ -798,7 +858,6 @@ async def eval_handler(client, message):
     stdout = redirected_output.getvalue()
     stderr = redirected_error.getvalue()
     
-    # FIX: Explicitly close the StringIO buffers to prevent silent memory leak under heavy load
     redirected_output.close()
     redirected_error.close()
     
@@ -816,7 +875,7 @@ async def eval_handler(client, message):
             reply_parameters=ReplyParameters(message_id=message.id)
         )
         os.remove(eval_path); await msg.delete()
-    else: await msg.edit(final_output)
+    else: await msg.edit_text(final_output)
 
 @bot_app.on_message(filters.command("broadcast"))
 async def broadcast_cmd(client, message):
@@ -838,13 +897,20 @@ async def broadcast_cmd(client, message):
     
     for user_id in auth_list:
         try:
-            await bot_app.send_message(user_id, f"📣 **Announcement from Admin:**\n\n{b_msg}")
+            await asyncio.wait_for(bot_app.send_message(user_id, f"📣 **Announcement from Admin:**\n\n{b_msg}"), timeout=10)
             success += 1
             await asyncio.sleep(0.5) 
-        except: failed += 1
+        except FloodWait as fw:
+            wait_time = getattr(fw, "value", getattr(fw, "x", 5))
+            await asyncio.sleep(wait_time)
+            try:
+                await asyncio.wait_for(bot_app.send_message(user_id, f"📣 **Announcement from Admin:**\n\n{b_msg}"), timeout=10)
+                success += 1
+            except Exception: failed += 1
+        except Exception: failed += 1
             
     msg = await bot_app.send_message(message.chat.id, f"✅ **Broadcast Complete!**\n\n🟢 **Success:** `{success}`\n🔴 **Failed:** `{failed}`", reply_parameters=ReplyParameters(message_id=message.id))
-    asyncio.create_task(delete_message_later(msg, 30))
+    spawn_task(delete_message_later(msg, 30))
 
 @bot_app.on_message(filters.command("bsetting"))
 async def bsetting_cmd(client, message):
