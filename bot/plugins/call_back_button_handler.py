@@ -118,7 +118,7 @@ async def panel_handler(client, cb):
             if current_pre: content_json.append({"tag": "pre", "children": [current_pre]})
             
             link = await get_graph_link(content_json, title="Subhasish Encoder Mediainfo", author="Subhasish Encoder")
-            btn = InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data=f"panel_back_{tid}", style=ButtonStyle.SECONDARY)]])
+            btn = InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data=f"panel_back_{tid}")]])
             await cb.message.edit(f"📊 **MediaInfo Link:**\n{link}", reply_markup=btn)
         except Exception as e: await cb.message.edit(f"❌ **MediaInfo Error:** `{e}`")
         finally:
@@ -198,7 +198,7 @@ async def bsetting_cb(client, cb):
         if key in config_data:
             del config_data[key]
             Config.save_config(config_data)
-        btn = InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back to Menu", callback_data="bsetting_back", style=ButtonStyle.SECONDARY), InlineKeyboardButton("❌ Close", callback_data="bsetting_close", style=ButtonStyle.DANGER)]])
+        btn = InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back to Menu", callback_data="bsetting_back"), InlineKeyboardButton("❌ Close", callback_data="bsetting_close", style=ButtonStyle.DANGER)]])
         await cb.message.edit(f"✅ **{key}** has been successfully removed.\n\n✨ **𝘛𝘺𝘱𝘦 /𝘳𝘦𝘴𝘵𝘢𝘳𝘵 𝘵𝘰 𝘢𝘱𝘱𝘭𝘺.** ✨", reply_markup=btn)
         del AppState.bsetting_state[user_id]
         return
@@ -218,7 +218,7 @@ async def bsetting_cb(client, cb):
         hide_keys = ["API_ID", "API_HASH", "TG_BOT_TOKEN", "OWNER_ID", "USER_SESSION_STRING"]
         lock_keys = ["API_ID", "API_HASH", "TG_BOT_TOKEN", "OWNER_ID"]
         current_val = "******** (Hidden for Security)" if key in hide_keys else config_data.get(key, "Not Set")
-        btn_list = [[InlineKeyboardButton("🔙 Back", callback_data="bsetting_back", style=ButtonStyle.SECONDARY), InlineKeyboardButton("❌ Close", callback_data="bsetting_close", style=ButtonStyle.DANGER)]]
+        btn_list = [[InlineKeyboardButton("🔙 Back", callback_data="bsetting_back"), InlineKeyboardButton("❌ Close", callback_data="bsetting_close", style=ButtonStyle.DANGER)]]
         if key != "AS_DOCUMENT" and key not in lock_keys and key in config_data: btn_list.insert(0, [InlineKeyboardButton("🗑 Remove Value", callback_data="bsetting_remove", style=ButtonStyle.DANGER)])
         btn = InlineKeyboardMarkup(btn_list)
         if key == "WATERMARK_TEXT": await cb.message.edit(f"📝 **Editing {key}**\n\n**Current Value:** `{current_val}`\n\n👇 **Send your Watermark text.**", reply_markup=btn)
@@ -236,7 +236,7 @@ async def bsetting_cb(client, cb):
             elif key in ["USER_SESSION_STRING", "API_HASH", "TG_BOT_TOKEN", "CRF", "PRESET", "RESOLUTION", "AUDIO_BITRATE", "CODEC", "WATERMARK_TEXT"]: v = str(v)
             config_data[key] = v
             Config.save_config(config_data)
-            btn = InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back to Menu", callback_data="bsetting_back", style=ButtonStyle.SECONDARY), InlineKeyboardButton("❌ Close", callback_data="bsetting_close", style=ButtonStyle.DANGER)]])
+            btn = InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back to Menu", callback_data="bsetting_back"), InlineKeyboardButton("❌ Close", callback_data="bsetting_close", style=ButtonStyle.DANGER)]])
             if key in hide_keys: await cb.message.edit(f"✅ **{key}** successfully securely stored.\n\n✨ **𝘛𝘺𝘱𝘦 /𝘳𝘦𝘴𝘵𝘢𝘳𝘵 𝘵𝘰 𝘢𝘱𝘱𝘭𝘺 𝘤𝘰𝘳𝘦 𝘤𝘩𝘢𝘯𝘨𝘦𝘴.** ✨", reply_markup=btn)
             else: await cb.message.edit(f"✅ **{key}** successfully updated to `{v}`.\n\n✨ **𝘛𝘺𝘱𝘦 /𝘳𝘦𝘴𝘵𝘢𝘳𝘵 𝘵𝘰 𝘢𝘱𝘱𝘭𝘺.** ✨", reply_markup=btn)
             if "msg_to_delete" in AppState.bsetting_state[user_id]:
