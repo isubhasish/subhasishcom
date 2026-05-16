@@ -1,7 +1,6 @@
 import httpx
 import asyncio
 
-# FIX: Caching the token globally so Telegraph doesn't rate limit us!
 GRAPH_TOKEN = None
 
 async def get_graph_link(content_json, title="MediaInfo", author="Subhasish Encoder"):
@@ -27,7 +26,9 @@ async def get_graph_link(content_json, title="MediaInfo", author="Subhasish Enco
                 
                 r = await client.post("https://api.telegra.ph/createPage", json=payload)
                 r.raise_for_status()
-                return r.json()["result"]["url"]
+                original_url = r.json()["result"]["url"]
+                safe_url = original_url.replace("telegra.ph", "graph.org")
+                return safe_url
             except Exception as e:
                 if attempt == 2:
                     raise Exception(f"Telegraph API Connection Error: {e}")

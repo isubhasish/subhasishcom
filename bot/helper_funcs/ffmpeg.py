@@ -338,7 +338,7 @@ async def worker():
                         except ValueError:
                             continue
 
-                        if time.time() - last_update_time > 4:
+                        if time.time() - last_update_time > 3.5:
                             curr_sec = out_time_ms / 1_000_000
                             safe_duration = duration_sec if duration_sec > 0 else max(curr_sec + 1, 1)
 

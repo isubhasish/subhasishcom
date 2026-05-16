@@ -53,8 +53,19 @@ async def status_cmd(client, message):
         )
     else: text = get_idle_text()
     msg = await bot_app.send_message(message.chat.id, text, reply_parameters=ReplyParameters(message_id=message.id))
-    for _ in range(15):
-        await asyncio.sleep(2)
+    total_target_time = 30.0
+    time_per_loop = 3.5
+    loop_start_time = time.perf_counter()
+    time_elapsed = 0.0
+
+    for _ in range(9):
+        time_left = total_target_time - time_elapsed
+        if time_left <= 0:
+            break
+
+        current_loop_time = min(time_per_loop, time_left)
+        await asyncio.sleep(current_loop_time)
+        time_elapsed = time.perf_counter() - loop_start_time
         if AppState.task_state != TaskState.IDLE:
             new_text = AppState.status_snapshot or (
                 f"🌐 <b><u>Bᴏᴛ Sᴛᴀᴛɪsᴛɪᴄs</u></b> 🌐\n\n"

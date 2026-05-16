@@ -58,7 +58,7 @@ async def progress_bar(current, total, status_text, message, start_time, last_up
         raise asyncio.CancelledError("Task Cancelled by User")
 
     now = time.time()
-    if round((now - last_update_time[0])) >= 5 or current == total:
+    if (now - last_update_time[0]) >= 3.5 or current == total:
         safe_total = max(total, 1)
         percent = current * 100 / safe_total
         elapsed = max(now - start_time, 0.001)
