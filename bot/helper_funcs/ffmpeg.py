@@ -113,31 +113,41 @@ async def start_tg_http_proxy(
             await writer.drain()
             
             sent_bytes = 0
-            async for chunk in active_client.stream_media(target_message, offset=chunk_offset, limit=chunk_limit):
-                if AppState.cancel_task or writer.is_closing():
-                    break
-                
-                if byte_skip > 0:
-                    trim = min(len(chunk), byte_skip)
-                    chunk = chunk[trim:]
-                    byte_skip -= trim
-                    if not chunk:
-                        continue
-                
-                if sent_bytes + len(chunk) > bytes_to_send:
-                    chunk = chunk[:bytes_to_send - sent_bytes]
+            stream = active_client.stream_media(target_message, offset=chunk_offset, limit=chunk_limit)
+            try:
+                stream_iter = stream.__aiter__()
+                while True:
+                    next_task = asyncio.create_task(stream_iter.__anext__())
+                    try: chunk = await asyncio.wait_for(next_task, timeout=15.0)
+                    except asyncio.TimeoutError: next_task.cancel(); break
+                    except StopAsyncIteration: break
 
-                try:
-                    writer.write(chunk)
-                    await writer.drain()
-                    sent_bytes += len(chunk)
-                    progress_dict["downloaded"] += len(chunk) 
-                except (BrokenPipeError, ConnectionResetError, OSError):
-                    break
-                
-                if sent_bytes >= bytes_to_send:
-                    break
+                    if AppState.cancel_task or writer.is_closing():
+                        break
+                    if byte_skip > 0:
+                        trim = min(len(chunk), byte_skip)
+                        chunk = chunk[trim:]
+                        byte_skip -= trim
+                        if not chunk:
+                            continue
+                    if sent_bytes + len(chunk) > bytes_to_send:
+                        chunk = chunk[:bytes_to_send - sent_bytes]
+
+                    try:
+                        writer.write(chunk)
+                        await writer.drain()
+                        sent_bytes += len(chunk)
+                        progress_dict["downloaded"] += len(chunk) 
+                    except (BrokenPipeError, ConnectionResetError, OSError):
+                        break
                     
+                    if sent_bytes >= bytes_to_send:
+                        break
+            finally:
+                if hasattr(stream, 'aclose'):
+                    try: await asyncio.wait_for(stream.aclose(), timeout=5.0)
+                    except Exception as exc: logger.debug(f"[TG_HTTP_PROXY] Stream aclose failed: {exc}")
+
         except (BrokenPipeError, ConnectionResetError):
             pass
         except Exception as exc:

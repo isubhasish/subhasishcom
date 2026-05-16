@@ -399,10 +399,7 @@ async def generate_sample_background(client, target_message, status_msg):
         if total_duration < 1.0:
             await safe_edit(status_msg, Localisation.SAMPLE_PROBING, reply_markup=sample_btn)
             probe_path = f"/tmp/probe_{uuid.uuid4().hex[:10]}.mkv"
-            with open(probe_path, "wb") as pf:
-                async for chunk in active_client.stream_media(target_message, limit=8):
-                    if AppState.cancel_task: raise asyncio.CancelledError()
-                    pf.write(chunk)
+            await download_media_chunk(active_client, target_message, probe_path, limit_bytes=8 * 1024 * 1024)
             if AppState.cancel_task: raise asyncio.CancelledError()
 
             probe_proc = await asyncio.create_subprocess_exec(
