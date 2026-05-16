@@ -1002,24 +1002,34 @@ async def bsetting_input_catcher(client, message):
         return
     
     try:
-        if user_id in AppState.bsetting_state and AppState.bsetting_state[user_id].get("step") == "awaiting_value":
+        async with AppState.state_lock:
+            state_data = AppState.bsetting_state.get(user_id)
+
+        if state_data and state_data.get("step") == "awaiting_value":
             if (message.text or "").startswith("/"):
-                del AppState.bsetting_state[user_id]
+                async with AppState.state_lock:
+                    AppState.bsetting_state.pop(user_id, None)
                 return
 
-            key = AppState.bsetting_state[user_id]["key"]
+            key = state_data["key"]
             val = message.text.strip()
 
-            AppState.bsetting_state[user_id]["msg_to_delete"] = message.id
+            async with AppState.state_lock:
+                if user_id in AppState.bsetting_state:
+                    AppState.bsetting_state[user_id]["msg_to_delete"] = message.id
 
             if str(config_data.get(key)) == str(val):
                 btn = InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back to Menu", callback_data="bsetting_back"), InlineKeyboardButton("❌ Close", callback_data="bsetting_close", style=ButtonStyle.DANGER)]])
                 msg = await bot_app.send_message(message.chat.id, f"⚠️ **{key}** is already set to `{val}`.", reply_markup=btn, reply_parameters=ReplyParameters(message_id=message.id))
-                AppState.bsetting_state[user_id]["bot_msg_to_delete"] = msg.id
+                async with AppState.state_lock:
+                    if user_id in AppState.bsetting_state:
+                        AppState.bsetting_state[user_id]["bot_msg_to_delete"] = msg.id
                 return
 
-            AppState.bsetting_state[user_id]["pending_value"] = val
-            AppState.bsetting_state[user_id]["step"] = "confirming"
+            async with AppState.state_lock:
+                if user_id in AppState.bsetting_state:
+                    AppState.bsetting_state[user_id]["pending_value"] = val
+                    AppState.bsetting_state[user_id]["step"] = "confirming"
 
             sensitive_keys = ["API_ID", "API_HASH", "TG_BOT_TOKEN", "OWNER_ID"]
             
@@ -1036,6 +1046,9 @@ async def bsetting_input_catcher(client, message):
             else: text = f"❓ **Confirm Update**\n\nYou entered a new value for **{key}**:\n`{val}`\n\nDo you want to save this?"
                 
             msg = await bot_app.send_message(message.chat.id, text, reply_markup=btn, reply_parameters=ReplyParameters(message_id=message.id))
-            AppState.bsetting_state[user_id]["bot_msg_to_delete"] = msg.id
+
+            async with AppState.state_lock:
+                if user_id in AppState.bsetting_state:
+                    AppState.bsetting_state[user_id]["bot_msg_to_delete"] = msg.id
     except Exception as e:
         logger.error(f"[BSETTING CATCHER ERROR] {e}")

@@ -22,6 +22,7 @@ class TaskState:
 class AppState:
     current_process = None
     process_lock = asyncio.Lock()
+    state_lock = asyncio.Lock()
     cancel_task = False
     cancelling = False
     task_state = TaskState.IDLE

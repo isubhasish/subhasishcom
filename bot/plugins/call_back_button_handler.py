@@ -56,8 +56,9 @@ def safe_callback(func):
 
         async def tracked_answer(*args, **kwargs):
             nonlocal answered
+            result = await original_answer(*args, **kwargs)
             answered = True  
-            return await original_answer(*args, **kwargs)
+            return result
 
         cb.answer = tracked_answer
 
@@ -80,12 +81,13 @@ def safe_callback(func):
 @bot_app.on_callback_query(filters.regex(r"^panel_(close|info|back|all|select|input)_(.+)$"))
 @safe_callback
 async def panel_handler(client, cb):
-    from bot.plugins.commands import safe_edit, safe_delete
+    from bot.plugins.commands import safe_edit, safe_delete, spawn_temporary_task
     
     action = cb.matches[0].group(1)
     tid = cb.matches[0].group(2)
     
-    task = AppState.pending_tasks.get(tid)
+    async with AppState.state_lock:
+        task = AppState.pending_tasks.get(tid)
     if not task: 
         await cb.answer("⚠️ Task Expired", show_alert=True)
         await safe_edit(cb.message, "⚠️ Task Expired")
@@ -94,7 +96,8 @@ async def panel_handler(client, cb):
     if action == "close":
         if not is_sudo(cb): return await cb.answer(UNAUTH_MSG, show_alert=True)
         await cb.answer() 
-        AppState.pending_tasks.pop(tid, None)
+        async with AppState.state_lock:
+            AppState.pending_tasks.pop(tid, None)
         await safe_delete(cb.message, log_context="Panel close message")
         if 'msg' in task: await safe_delete(task['msg'], log_context="Panel task msg")
         return
@@ -118,12 +121,10 @@ async def panel_handler(client, cb):
             process = await asyncio.create_subprocess_exec(
                 "mediainfo", chunk_path, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE, start_new_session=True
             )
-            try: 
-                stdout, _ = await asyncio.wait_for(process.communicate(), timeout=30)
+            try: stdout, _ = await asyncio.wait_for(process.communicate(), timeout=30)
             except asyncio.TimeoutError:
                 raise Exception("MediaInfo Process Timed Out")
             finally:
-                # FIX: Iron-clad finally block mathematically guarantees process destruction
                 if process.returncode is None:
                     try:
                         os.killpg(os.getpgid(process.pid), signal.SIGKILL)
@@ -134,10 +135,10 @@ async def panel_handler(client, cb):
                     await process.wait()
                 
             raw_info = stdout.decode('utf-8', errors='replace').strip()
-            raw_info = re.sub(r"Complete name\s+:\s+.*", f"Complete name                            : {task['name']}", raw_info)
+            raw_info = re.sub(r"Complete name\s+:\s+.*", f"Complete name                            : {task.get('name', 'video.mp4')}", raw_info)
             raw_info = re.sub(r"File size\s+:\s+.*", f"File size                                : {size_str}", raw_info)
             
-            content_json = [{"tag": "h3", "children": [task['name']]}]
+            content_json = [{"tag": "h3", "children": [task.get('name', 'video.mp4')]}]
             current_pre = ""
             for line in raw_info.split('\n'):
                 clean_line = line.strip()
@@ -152,7 +153,7 @@ async def panel_handler(client, cb):
             
             if current_pre: content_json.append({"tag": "pre", "children": [current_pre]})
             
-            link = await get_graph_link(content_json, title="SUBHASISH", author="DEAD RAILS")
+            link = await get_graph_link(content_json, title="Subhasish Encoder Mediainfo", author="Subhasish Encoder")
             btn = InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data=f"panel_back_{tid}")]])
             await safe_edit(cb.message, f"📊 **MediaInfo Link:**\n{link}", reply_markup=btn)
         except asyncio.CancelledError:
@@ -181,9 +182,10 @@ async def panel_handler(client, cb):
             QUEUE_MSG, 
             reply_parameters=ReplyParameters(message_id=task['msg'].id)
         )
-        await queue.put((task['msg'], task['name'], ["-map", "0"], new_status_msg))
+        await queue.put((task['msg'], task.get('name', 'video.mp4'), ["-map", "0"], new_status_msg))
 
-        AppState.pending_tasks.pop(tid, None)
+        async with AppState.state_lock:
+            AppState.pending_tasks.pop(tid, None)
 
     elif action == "select":
         await cb.answer() 
@@ -201,8 +203,7 @@ async def panel_handler(client, cb):
             process = await asyncio.create_subprocess_exec(
                 "ffprobe", "-v", "error", "-show_entries", "stream=index,codec_type,codec_name:stream_tags=language", "-of", "json", chunk_path, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE, start_new_session=True
             )
-            try: 
-                stdout, _ = await asyncio.wait_for(process.communicate(), timeout=30)
+            try: stdout, _ = await asyncio.wait_for(process.communicate(), timeout=30)
             except asyncio.TimeoutError:
                 raise Exception("FFProbe Process Timed Out")
             finally:
@@ -241,15 +242,18 @@ async def panel_handler(client, cb):
         )
         
         state_key = (cb.message.chat.id, cb.from_user.id)
-        AppState.awaiting_index[state_key] = {"tid": tid, "menu_msg_id": prompt.id, "stream_msg_id": cb.message.id}
+        async with AppState.state_lock:
+            AppState.awaiting_index[state_key] = {"tid": tid, "menu_msg_id": prompt.id, "stream_msg_id": cb.message.id}
 
         async def auto_clear_state():
             await asyncio.sleep(300) 
-            if AppState.awaiting_index.get(state_key, {}).get("tid") == tid:
-                AppState.awaiting_index.pop(state_key, None)
-                from bot.plugins.commands import safe_delete
-                await safe_delete(prompt, log_context="Timeout input prompt")
-        asyncio.create_task(auto_clear_state())
+            async with AppState.state_lock:
+                if AppState.awaiting_index.get(state_key, {}).get("tid") == tid:
+                    AppState.awaiting_index.pop(state_key, None)
+            from bot.plugins.commands import safe_delete
+            await safe_delete(prompt, log_context="Timeout input prompt")
+                    
+        spawn_temporary_task(auto_clear_state(), max_timeout=360)
 
 @bot_app.on_callback_query(filters.regex(r"^bsetting_(.*)"))
 @safe_callback
@@ -261,14 +265,15 @@ async def bsetting_cb(client, cb):
 
     if action == "remove":
         await cb.answer()
-        if user_id not in AppState.bsetting_state: return
-        key = AppState.bsetting_state[user_id]["key"]
-        if key in config_data:
-            del config_data[key]
-            Config.save_config(config_data)
+        async with AppState.state_lock:
+            if user_id not in AppState.bsetting_state: return
+            key = AppState.bsetting_state[user_id]["key"]
+            if key in config_data:
+                del config_data[key]
+                Config.save_config(config_data)
+            del AppState.bsetting_state[user_id]
         btn = InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back to Menu", callback_data="bsetting_back"), InlineKeyboardButton("❌ Close", callback_data="bsetting_close", style=ButtonStyle.DANGER)]])
         await safe_edit(cb.message, f"✅ **{key}** has been successfully removed.\n\n✨ **𝘛𝘺𝘱𝘦 /𝘳𝘦𝘴𝘵𝘢𝘳𝘵 𝘵𝘰 𝘢𝘱𝘱𝘭𝘺.** ✨", reply_markup=btn)
-        del AppState.bsetting_state[user_id]
         return
 
     if action.startswith("toggle_"):
@@ -283,7 +288,8 @@ async def bsetting_cb(client, cb):
     if action.startswith("select_"):
         await cb.answer()
         key = action.replace("select_", "")
-        AppState.bsetting_state[user_id] = {"key": key, "step": "awaiting_value"}
+        async with AppState.state_lock:
+            AppState.bsetting_state[user_id] = {"key": key, "step": "awaiting_value"}
         hide_keys = ["API_ID", "API_HASH", "TG_BOT_TOKEN", "OWNER_ID", "USER_SESSION_STRING"]
         lock_keys = ["API_ID", "API_HASH", "TG_BOT_TOKEN", "OWNER_ID"]
         current_val = "******** (Hidden for Security)" if key in hide_keys else config_data.get(key, "Not Set")
@@ -294,10 +300,13 @@ async def bsetting_cb(client, cb):
         else: await safe_edit(cb.message, f"📝 **Editing {key}**\n\n**Current Value:** `{current_val}`\n\n👇 **Send the new value as a normal message now.**", reply_markup=btn)
 
     elif action == "confirm_yes":
-        if user_id not in AppState.bsetting_state or "pending_value" not in AppState.bsetting_state[user_id]: return await cb.answer("Session expired.", show_alert=True)
-        await cb.answer()
-        key = AppState.bsetting_state[user_id]["key"]
-        raw_val = AppState.bsetting_state[user_id]["pending_value"]
+        async with AppState.state_lock:
+            if user_id not in AppState.bsetting_state or "pending_value" not in AppState.bsetting_state[user_id]: return await cb.answer("Session expired.", show_alert=True)
+            await cb.answer()
+            key = AppState.bsetting_state[user_id]["key"]
+            raw_val = AppState.bsetting_state[user_id]["pending_value"]
+            msg_to_delete = AppState.bsetting_state[user_id].get("msg_to_delete")
+            del AppState.bsetting_state[user_id]
         hide_keys = ["API_ID", "API_HASH", "TG_BOT_TOKEN", "OWNER_ID", "USER_SESSION_STRING"]
         try:
             v = raw_val
@@ -309,30 +318,40 @@ async def bsetting_cb(client, cb):
             btn = InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back to Menu", callback_data="bsetting_back"), InlineKeyboardButton("❌ Close", callback_data="bsetting_close", style=ButtonStyle.DANGER)]])
             if key in hide_keys: await safe_edit(cb.message, f"✅ **{key}** successfully securely stored.\n\n✨ **𝘛𝘺𝘱𝘦 /𝘳𝘦𝘴𝘵𝘢𝘳𝘵 𝘵𝘰 𝘢𝘱𝘱𝘭𝘺 𝘤𝘰𝘳𝘦 𝘤𝘩𝘢𝘯𝘨𝘦𝘴.** ✨", reply_markup=btn)
             else: await safe_edit(cb.message, f"✅ **{key}** successfully updated to `{v}`.\n\n✨ **𝘛𝘺𝘱𝘦 /𝘳𝘦𝘴𝘵𝘢𝘳𝘵 𝘵𝘰 𝘢𝘱𝘱𝘭𝘺.** ✨", reply_markup=btn)
-            if "msg_to_delete" in AppState.bsetting_state[user_id]:
-                await safe_delete_by_id(client, cb.message.chat.id, AppState.bsetting_state[user_id]["msg_to_delete"], log_context="Bsetting old msg")
+            if msg_to_delete:
+                await safe_delete_by_id(client, cb.message.chat.id, msg_to_delete, log_context="Bsetting old msg")
         except asyncio.CancelledError:
             raise
         except Exception as e: await safe_edit(cb.message, f"❌ **Error formatting variable:**\n{e}")
-        del AppState.bsetting_state[user_id]
 
     elif action == "confirm_no":
         await cb.answer()
-        if user_id in AppState.bsetting_state: 
-            if "msg_to_delete" in AppState.bsetting_state[user_id]:
-                await safe_delete_by_id(client, cb.message.chat.id, AppState.bsetting_state[user_id]["msg_to_delete"], log_context="Bsetting old msg")
-            del AppState.bsetting_state[user_id]
+        async with AppState.state_lock:
+            if user_id in AppState.bsetting_state: 
+                msg_to_delete = AppState.bsetting_state[user_id].get("msg_to_delete")
+                del AppState.bsetting_state[user_id]
+            else:
+                msg_to_delete = None
+
+        if msg_to_delete:
+            await safe_delete_by_id(client, cb.message.chat.id, msg_to_delete, log_context="Bsetting old msg")
         await safe_edit(cb.message, "❌ Update cancelled.")
         await asyncio.sleep(2)
         await safe_edit(cb.message, "**⚙️ Bot Settings Menu**", reply_markup=get_bsetting_menu())
 
     elif action in ["back", "close"]:
         await cb.answer()
-        if user_id in AppState.bsetting_state: 
-            if "msg_to_delete" in AppState.bsetting_state[user_id]:
-                await safe_delete_by_id(client, cb.message.chat.id, AppState.bsetting_state[user_id]["msg_to_delete"], log_context="Bsetting old msg")
-            del AppState.bsetting_state[user_id]
+        async with AppState.state_lock:
+            if user_id in AppState.bsetting_state: 
+                msg_to_delete = AppState.bsetting_state[user_id].get("msg_to_delete")
+                del AppState.bsetting_state[user_id]
+            else:
+                msg_to_delete = None
+
+        if msg_to_delete:
+            await safe_delete_by_id(client, cb.message.chat.id, msg_to_delete, log_context="Bsetting old msg")
         if action == "close":
+            from bot.plugins.commands import safe_delete
             await safe_delete(cb.message, log_context="Bsetting close msg")
             if cb.message.reply_to_message: await safe_delete(cb.message.reply_to_message, log_context="Bsetting close reply msg")
             return
@@ -347,7 +366,7 @@ async def bsetting_cb(client, cb):
 @bot_app.on_callback_query(filters.regex("cancel_running"))
 @safe_callback
 async def cancel_running_cb(client, cb):
-    from bot.plugins.commands import safe_delete
+    from bot.plugins.commands import safe_delete, spawn_temporary_task
     if not is_sudo(cb): return await cb.answer(UNAUTH_MSG, show_alert=True)
     if AppState.task_state == TaskState.IDLE: return await cb.answer("No active task.", show_alert=True)
     await cb.answer()
@@ -362,10 +381,10 @@ async def cancel_running_cb(client, cb):
         reply_markup=btn
     )
     
-    async def auto_delete_prompt(msg):
+    async def auto_delete_prompt():
         await asyncio.sleep(10)
-        await safe_delete(msg, log_context="Cancel prompt auto-delete")
-    asyncio.create_task(auto_delete_prompt(prompt))
+        await safe_delete(prompt, log_context="Cancel prompt auto-delete")
+    spawn_temporary_task(auto_delete_prompt(), max_timeout=20)
 
 @bot_app.on_callback_query(filters.regex(r"^confirm_cancel_(.*)"))
 @safe_callback

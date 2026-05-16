@@ -74,7 +74,8 @@ async def incoming_media(client, message):
     
     size_str, dc_str = get_file_info(message)
     
-    AppState.pending_tasks[tid] = {"msg": message, "name": file_name}
+    async with AppState.state_lock:
+        AppState.pending_tasks[tid] = {"msg": message, "name": file_name}
 
     btn = InlineKeyboardMarkup([
         [InlineKeyboardButton("▶️ ᴄᴏᴍᴘʀᴇss ▶️", callback_data=f"panel_all_{tid}", style=ButtonStyle.SUCCESS), InlineKeyboardButton("🎞 sᴇʟᴇᴄᴛ sᴛʀᴇᴀᴍ 🎞", callback_data=f"panel_select_{tid}", style=ButtonStyle.PRIMARY)],
@@ -98,14 +99,22 @@ async def index_receiver(client, message):
     if not message.reply_to_message: return
     
     chat_id = message.chat.id
-    
-    if chat_id in AppState.awaiting_index and AppState.awaiting_index[chat_id].get("menu_msg_id") == message.reply_to_message.id:
-        tid = AppState.awaiting_index[chat_id]["tid"]
-        stream_msg_id = AppState.awaiting_index[chat_id].get("stream_msg_id")
-        task = AppState.pending_tasks.get(tid)
+    user_id = message.from_user.id
+    state_key = (chat_id, user_id)
+
+    async with AppState.state_lock:
+        state_data = AppState.awaiting_index.get(state_key)
+
+    if state_data and state_data.get("menu_msg_id") == message.reply_to_message.id:
+        tid = state_data["tid"]
+        stream_msg_id = state_data.get("stream_msg_id")
+
+        async with AppState.state_lock:
+            task = AppState.pending_tasks.get(tid)
         
         if not task:
-            del AppState.awaiting_index[chat_id]
+            async with AppState.state_lock:
+                AppState.awaiting_index.pop(state_key, None)
             return await bot_app.send_message(
                 chat_id, 
                 "⚠️ Task expired.", 
@@ -127,7 +136,8 @@ async def index_receiver(client, message):
                 try: await bot_app.delete_messages(chat_id, stream_msg_id)
                 except: pass
                 
-            del AppState.awaiting_index[chat_id]
+            async with AppState.state_lock:
+                AppState.awaiting_index.pop(state_key, None)
             
             new_status_msg = await bot_app.send_message(
                 chat_id, 
