@@ -302,15 +302,12 @@ async def worker():
             cmd = [
                 "ffmpeg", "-hide_banner", "-loglevel", "error", "-nostats", "-i", file_path
             ] + map_args + [
-                "-map_chapters", "0",
-                "-max_muxing_queue_size", "4096", 
                 "-c:v", str(config_data.get("CODEC", "libx265")), 
                 "-crf", crf_val, 
                 "-preset", str(config_data.get("PRESET", "fast")),
                 "-vf", vf_string, 
                 "-c:a", "libopus", 
                 "-b:a", str(config_data.get("AUDIO_BITRATE", "96k")), 
-                "-c:s", "copy",
                 "-progress", "pipe:1",
                 "-y", out
             ]
@@ -400,7 +397,7 @@ async def worker():
                 async with AppState.process_lock:
                     if AppState.current_process == process: AppState.current_process = None
                 if process.returncode != 0 and not AppState.cancel_task: 
-                    raise RuntimeError(f"FFmpeg failed with return code {process.returncode}")
+                    raise asyncio.CancelledError("FFmpeg failed or cancelled")
                     
             except asyncio.CancelledError:
                 await abort_current_task(status_msg, file_path, out, chat_id=chat_id_target)
