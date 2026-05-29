@@ -177,6 +177,7 @@ async def take_screen_shot(video_file: str, output_directory: str, ttl: int) -> 
         try:
             proc = await asyncio.create_subprocess_exec(
                 *cmd,
+                stdin=asyncio.subprocess.DEVNULL,
                 stdout=asyncio.subprocess.DEVNULL,
                 stderr=asyncio.subprocess.DEVNULL,
                 start_new_session=True,
@@ -292,6 +293,7 @@ async def worker():
                     probe = await asyncio.create_subprocess_exec(
                         "ffprobe", "-v", "quiet", "-show_entries", "format=duration",
                         "-of", "default=noprint_wrappers=1:nokey=1", file_path,
+                        stdin=asyncio.subprocess.DEVNULL,
                         stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL, start_new_session=True
                     )
                     probe_stdout, _ = await asyncio.wait_for(probe.communicate(), timeout=30)
@@ -300,30 +302,47 @@ async def worker():
                     duration_sec = 0
 
             cmd = [
-                "ffmpeg", "-hide_banner", "-loglevel", "error", "-nostats", "-i", file_path
+                "ffmpeg", "-hide_banner", "-loglevel", "error", "-nostats", "-nostdin", "-i", file_path
             ] + map_args + [
                 "-c:v", str(config_data.get("CODEC", "libx265")), 
                 "-crf", crf_val, 
                 "-preset", str(config_data.get("PRESET", "fast")),
-                "-vf", vf_string, 
+                "-filter:v:0", vf_string, 
                 "-c:a", "libopus", 
                 "-b:a", str(config_data.get("AUDIO_BITRATE", "96k")), 
+                "-c:s", "copy",
+                "-max_muxing_queue_size", "1024",
                 "-progress", "pipe:1",
                 "-y", out
             ]
             
             encode_start_time = time.time()
-            
+            stderr_lines = []
+            # Localized async function to safely drain stderr without global memory leaks
+            async def drain_stderr(proc):
+                if proc.stderr is None: return
+                try:
+                    while True:
+                        line = await proc.stderr.readline()
+                        if not line: break
+                        stderr_lines.append(line.decode("utf-8", errors="ignore"))
+                except Exception:
+                    pass
+
             try:
                 process = await asyncio.create_subprocess_exec(
                     *cmd, 
+                    stdin=asyncio.subprocess.DEVNULL,
                     stdout=asyncio.subprocess.PIPE, 
-                    stderr=asyncio.subprocess.DEVNULL, 
+                    stderr=asyncio.subprocess.PIPE, 
                     start_new_session=True
                 )
+                stderr_task = asyncio.create_task(drain_stderr(process))
                 async with AppState.process_lock:
                     AppState.current_process = process
                 last_update_time = time.time() - 10 
+                last_progress_seen = time.time()
+                last_heartbeat_time = time.time()
                 btn = InlineKeyboardMarkup([[InlineKeyboardButton("🛑 Cancel Task", callback_data="cancel_running", style=ButtonStyle.DANGER)]])
 
                 while True:
@@ -331,10 +350,23 @@ async def worker():
                         await kill_running_process()
                         raise asyncio.CancelledError("Task Cancelled by User")
 
-                    line_bytes = await safe_readline(process.stdout)
+                    line_bytes = await safe_readline(process.stdout, timeout=5)
                     
                     if line_bytes is None:
                         if process.returncode is not None: break
+                        # [NEW] The UI Heartbeat Logic
+                        if time.time() - last_progress_seen > 15 and time.time() - last_heartbeat_time > 10:
+                            try:
+                                elapsed_hb = time.time() - encode_start_time
+                                await status_msg.edit(
+                                    f"📀 **Preparing For Compression ...**\n\n"
+                                    f"⏳ **Status:** Processing headers/metadata...\n"
+                                    f"⏱ **Time taken so far:** {time_formatter(elapsed_hb * 1000)}",
+                                    reply_markup=btn
+                                )
+                                last_heartbeat_time = time.time()
+                            except Exception:
+                                pass
                         continue 
                     if line_bytes == b"":
                         break    
@@ -343,6 +375,7 @@ async def worker():
                     if not line_str: continue
 
                     if line_str.startswith("out_time_ms="):
+                        last_progress_seen = time.time()
                         try:
                             out_time_ms = int(line_str.split("=", 1)[1])
                         except ValueError:
@@ -393,11 +426,13 @@ async def worker():
                         os.killpg(os.getpgid(process.pid), signal.SIGKILL)
                         await process.wait()
                     except: pass
-                    
+                await stderr_task
                 async with AppState.process_lock:
                     if AppState.current_process == process: AppState.current_process = None
+                # Capture actual stderr for real error logging
                 if process.returncode != 0 and not AppState.cancel_task: 
-                    raise asyncio.CancelledError("FFmpeg failed or cancelled")
+                    error_msg = "".join(stderr_lines)[-3000:]
+                    raise Exception(f"FFmpeg exit {process.returncode}. Log: {error_msg}")
                     
             except asyncio.CancelledError:
                 await abort_current_task(status_msg, file_path, out, chat_id=chat_id_target)
@@ -412,6 +447,9 @@ async def worker():
                     if file_path and os.path.exists(file_path): os.remove(file_path)
                     if out and os.path.exists(out): os.remove(out)
                     continue
+            finally:
+                if 'stderr_task' in locals() and not stderr_task.done():
+                    stderr_task.cancel()
             
             if AppState.cancel_task:
                 await abort_current_task(status_msg, file_path, out, chat_id=chat_id_target)
@@ -436,12 +474,13 @@ async def worker():
                     split_time = f"{st_h:02d}:{st_m:02d}:{st_s:02d}"
 
                 split_cmd = [
-                    "ffmpeg", "-hide_banner", "-loglevel", "error", "-nostats",
+                    "ffmpeg", "-hide_banner", "-loglevel", "error", "-nostats", "-nostdin",
                     "-i", out, "-c", "copy", "-f", "segment", "-segment_time", split_time, 
                     "-reset_timestamps", "1", f"{base_name}_part%03d{ext}"
                 ]
                 s_proc = await asyncio.create_subprocess_exec(
                     *split_cmd, 
+                    stdin=asyncio.subprocess.DEVNULL,
                     stdout=asyncio.subprocess.DEVNULL, 
                     stderr=asyncio.subprocess.DEVNULL, 
                     start_new_session=True
