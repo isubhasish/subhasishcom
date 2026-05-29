@@ -318,7 +318,6 @@ async def worker():
             
             encode_start_time = time.time()
             stderr_lines = []
-            # Localized async function to safely drain stderr without global memory leaks
             async def drain_stderr(proc):
                 if proc.stderr is None: return
                 try:
@@ -326,8 +325,7 @@ async def worker():
                         line = await proc.stderr.readline()
                         if not line: break
                         stderr_lines.append(line.decode("utf-8", errors="ignore"))
-                except Exception:
-                    pass
+                except Exception: pass
 
             try:
                 process = await asyncio.create_subprocess_exec(
@@ -354,7 +352,6 @@ async def worker():
                     
                     if line_bytes is None:
                         if process.returncode is not None: break
-                        # [NEW] The UI Heartbeat Logic
                         if time.time() - last_progress_seen > 15 and time.time() - last_heartbeat_time > 10:
                             try:
                                 elapsed_hb = time.time() - encode_start_time
@@ -365,8 +362,7 @@ async def worker():
                                     reply_markup=btn
                                 )
                                 last_heartbeat_time = time.time()
-                            except Exception:
-                                pass
+                            except Exception: pass
                         continue 
                     if line_bytes == b"":
                         break    
@@ -429,7 +425,6 @@ async def worker():
                 await stderr_task
                 async with AppState.process_lock:
                     if AppState.current_process == process: AppState.current_process = None
-                # Capture actual stderr for real error logging
                 if process.returncode != 0 and not AppState.cancel_task: 
                     error_msg = "".join(stderr_lines)[-3000:]
                     raise Exception(f"FFmpeg exit {process.returncode}. Log: {error_msg}")

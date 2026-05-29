@@ -164,7 +164,7 @@ async def panel_handler(client, cb):
         await cb.answer("Added to queue!", show_alert=False)
         try: new_status_msg = await bot_app.send_message(cb.message.chat.id, QUEUE_MSG, reply_parameters=ReplyParameters(message_id=task['msg'].id))
         except Exception as e: logger.debug(f"Reply fallback triggered: {e}"); new_status_msg = await bot_app.send_message(cb.message.chat.id, QUEUE_MSG)
-        try: await queue.put((task['msg'], task.get('name', 'video.mp4'), ["-map", "0"], new_status_msg))
+        try: await queue.put((task['msg'], task.get('name', 'video.mp4'), ["-map", "0:v:0", "-map", "0:a?", "-map", "0:s?"], new_status_msg))
         finally:
             async with AppState.state_lock: AppState.pending_tasks.pop(tid, None)
         await safe_delete(cb.message, log_context="Panel compress message")
