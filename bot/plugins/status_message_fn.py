@@ -7,6 +7,7 @@ from bot.helper_funcs.utils import AppState, TaskState, queue, get_sys_stats, ge
 from bot.helper_funcs.display_progress import humanbytes
 
 UNAUTH_MSG = "<b>You are not allowed to do that 🤭</b>"
+ACTIVE_STATUS = {}
 
 def is_sudo(message):
     user_id = message.from_user.id if message.from_user else 0
@@ -45,6 +46,10 @@ async def status_cmd(client, message):
         unauth_msg = await bot_app.send_message(message.chat.id, UNAUTH_MSG, reply_parameters=ReplyParameters(message_id=message.id))
         asyncio.create_task(auto_delete_unauth(unauth_msg))
         return
+    chat_id = message.chat.id
+    if chat_id in ACTIVE_STATUS:
+        try: await bot_app.delete_messages(chat_id, [ACTIVE_STATUS[chat_id]["u"], ACTIVE_STATUS[chat_id]["b"]])
+        except Exception: pass
     if AppState.task_state != TaskState.IDLE:
         text = AppState.status_snapshot or (
             f"🌐 <b><u>Bᴏᴛ Sᴛᴀᴛɪsᴛɪᴄs</u></b> 🌐\n\n"
@@ -53,12 +58,13 @@ async def status_cmd(client, message):
         )
     else: text = get_idle_text()
     msg = await bot_app.send_message(message.chat.id, text, reply_parameters=ReplyParameters(message_id=message.id))
+    ACTIVE_STATUS[chat_id] = {"u": message.id, "b": msg.id}
     total_target_time = 30.0
-    time_per_loop = 3.5
+    time_per_loop = 4.0
     loop_start_time = time.perf_counter()
     time_elapsed = 0.0
 
-    for _ in range(9):
+    for _ in range(7):
         time_left = total_target_time - time_elapsed
         if time_left <= 0:
             break

@@ -32,6 +32,15 @@ SPEEDTEST_LOCK = asyncio.Lock()
 BACKGROUND_TASKS = set()
 MESSAGE_LOCKS = {}
 LAST_SENT_TEXT = OrderedDict()
+ACTIVE_CMDS = {}
+
+async def singleton_clear(chat_id, cmd):
+    if chat_id in ACTIVE_CMDS and cmd in ACTIVE_CMDS[chat_id]:
+        try: await bot_app.delete_messages(chat_id, [ACTIVE_CMDS[chat_id][cmd]["u"], ACTIVE_CMDS[chat_id][cmd]["b"]])
+        except Exception: pass
+def singleton_set(chat_id, cmd, u_id, b_id):
+    if chat_id not in ACTIVE_CMDS: ACTIVE_CMDS[chat_id] = {}
+    ACTIVE_CMDS[chat_id][cmd] = {"u": u_id, "b": b_id}
 
 def get_msg_lock(msg_id):
     if len(MESSAGE_LOCKS) > 500:
@@ -108,33 +117,39 @@ async def auto_clean(msg, message):
 
 @bot_app.on_message(filters.command("start"))
 async def start_cmd(client, message): 
+    await singleton_clear(message.chat.id, "start")
     btn = InlineKeyboardMarkup([[
         InlineKeyboardButton("Donate Me Some Bucks.. 🥺💰", url="https://t.me/Subhasish_bot", style=ButtonStyle.SUCCESS)
     ]])
-    await bot_app.send_message(
+    msg = await bot_app.send_message(
         message.chat.id, 
         Localisation.START_TEXT, 
         reply_markup=btn,
         reply_parameters=ReplyParameters(message_id=message.id)
     )
+    singleton_set(message.chat.id, "start", message.id, msg.id)
 
 @bot_app.on_message(filters.command("help"))
 async def help_cmd(client, message): 
+    await singleton_clear(message.chat.id, "help")
     msg = await bot_app.send_message(
         message.chat.id, 
         Localisation.HELP_TEXT,
         reply_parameters=ReplyParameters(message_id=message.id)
     )
+    singleton_set(message.chat.id, "help", message.id, msg.id)
     spawn_temporary_task(auto_clean(msg, message))
 
 @bot_app.on_message(filters.command("ping"))
 async def ping_cmd(client, message):
+    await singleton_clear(message.chat.id, "ping")
     start_t = time.time()
     msg = await bot_app.send_message(
         message.chat.id, 
         "...",
         reply_parameters=ReplyParameters(message_id=message.id)
     )
+    singleton_set(message.chat.id, "ping", message.id, msg.id)
     end_t = time.time()
     ping_ms = round((end_t - start_t) * 1000)
     uptime_str = get_uptime()
@@ -170,6 +185,7 @@ async def ping_cmd(client, message):
 async def settings_cmd(client, message):
     if not is_sudo(message): 
         return await bot_app.send_message(message.chat.id, UNAUTH_MSG, reply_parameters=ReplyParameters(message_id=message.id))
+    await singleton_clear(message.chat.id, "settings")
     text = (
         "⚠️ **Current Ffmpeg Code Settings**\n"
         "The current settings will be added to your video file :\n\n"
@@ -181,21 +197,27 @@ async def settings_cmd(client, message):
         f"**Watermark :** `{config_data.get('WATERMARK_TEXT', 'None')}`\n"
         f"**Upload As Document :** `{config_data.get('AS_DOCUMENT', True)}`"
     )
-    await bot_app.send_message(message.chat.id, text, reply_parameters=ReplyParameters(message_id=message.id))
+    msg = await bot_app.send_message(message.chat.id, text, reply_parameters=ReplyParameters(message_id=message.id))
+    singleton_set(message.chat.id, "settings", message.id, msg.id)
+    spawn_temporary_task(auto_clean(msg, message))
 
 async def update_setting(message, key, display_name):
     if not is_sudo(message): 
         return await bot_app.send_message(message.chat.id, UNAUTH_MSG, reply_parameters=ReplyParameters(message_id=message.id))
+    await singleton_clear(message.chat.id, display_name)
     if len(message.command) < 2: 
         msg = await bot_app.send_message(message.chat.id, f"Current {display_name}: `{config_data.get(key)}`", reply_parameters=ReplyParameters(message_id=message.id))
+        singleton_set(message.chat.id, display_name, message.id, msg.id)
         return spawn_temporary_task(auto_clean(msg, message))
     val = message.command[1]
     if str(config_data.get(key)) == str(val): 
         msg = await bot_app.send_message(message.chat.id, f"⚠️ {display_name} is already set to `{val}`", reply_parameters=ReplyParameters(message_id=message.id))
+        singleton_set(message.chat.id, display_name, message.id, msg.id)
         return spawn_temporary_task(auto_clean(msg, message))
     config_data[key] = val
     Config.save_config(config_data)
     msg = await bot_app.send_message(message.chat.id, f"✅ {display_name} successfully updated to `{val}`.", reply_parameters=ReplyParameters(message_id=message.id))
+    singleton_set(message.chat.id, display_name, message.id, msg.id)
     spawn_temporary_task(auto_clean(msg, message))
 
 @bot_app.on_message(filters.command("preset"))
@@ -213,7 +235,7 @@ async def codec_cmd(client, message): await update_setting(message, "CODEC", "co
 async def clear_cmd(client, message):
     if not is_sudo(message): 
         return await bot_app.send_message(message.chat.id, UNAUTH_MSG, reply_parameters=ReplyParameters(message_id=message.id))
-    
+    await singleton_clear(message.chat.id, "clear")
     while True:
         try:
             queue.get_nowait()
@@ -223,14 +245,17 @@ async def clear_cmd(client, message):
             queue.task_done()
             
     msg = await bot_app.send_message(message.chat.id, Localisation.QUEUE_CLEARED, reply_parameters=ReplyParameters(message_id=message.id))
+    singleton_set(message.chat.id, "clear", message.id, msg.id)
     spawn_temporary_task(auto_clean(msg, message))
 
 @bot_app.on_message(filters.command("cancel"))
 async def cancel_cmd(client, message):
     if not is_sudo(message): 
         return await bot_app.send_message(message.chat.id, UNAUTH_MSG, reply_parameters=ReplyParameters(message_id=message.id))
+    await singleton_clear(message.chat.id, "cancel")
     if AppState.task_state == TaskState.IDLE: 
         msg = await bot_app.send_message(message.chat.id, Localisation.NO_ACTIVE_TASK, reply_parameters=ReplyParameters(message_id=message.id))
+        singleton_set(message.chat.id, "cancel", message.id, msg.id)
         return spawn_temporary_task(auto_clean(msg, message))
     
     btn = InlineKeyboardMarkup([[InlineKeyboardButton("Yes ✅", callback_data="confirm_cancel_yes", style=ButtonStyle.SUCCESS), InlineKeyboardButton("No ❌", callback_data="confirm_cancel_no", style=ButtonStyle.DANGER)]])
@@ -241,13 +266,16 @@ async def cancel_cmd(client, message):
         reply_markup=btn, 
         reply_parameters=ReplyParameters(message_id=message.id)
     )
+    singleton_set(message.chat.id, "cancel", message.id, msg.id)
     spawn_temporary_task(auto_clean(msg, message))
 
 @bot_app.on_message(filters.command("log"))
 async def log_cmd(client, message):
     if not is_sudo(message): 
         return await bot_app.send_message(message.chat.id, UNAUTH_MSG, reply_parameters=ReplyParameters(message_id=message.id))
+    await singleton_clear(message.chat.id, "log")
     msg = await bot_app.send_message(message.chat.id, "⏳ Fetching bot logs...", reply_parameters=ReplyParameters(message_id=message.id))
+    singleton_set(message.chat.id, "log", message.id, msg.id)
     try:
         log_path = os.path.join(Config.ENV_DIR, "bot.log")
         if not os.path.exists(log_path): return await msg.edit_text("⚠️ Log file is empty or not yet created.")
@@ -261,15 +289,20 @@ async def log_cmd(client, message):
         link = await get_graph_link(content_json, "Subhasish Encoder Logs", "Subhasish Encoder")
         await msg.edit_text(f"📝 **Bot Logs:**\n{link}")
     except Exception as e: await msg.edit_text(f"❌ Failed to fetch logs: {e}")
+    spawn_temporary_task(auto_clean(msg, message))
 
 @bot_app.on_message(filters.command("mediainfo"))
 async def mediainfo_cmd(client, message):
     if not is_sudo(message): 
         return await bot_app.send_message(message.chat.id, UNAUTH_MSG, reply_parameters=ReplyParameters(message_id=message.id))
+    await singleton_clear(message.chat.id, "mediainfo")
     if not message.reply_to_message or not getattr(message.reply_to_message, 'video', None) and not getattr(message.reply_to_message, 'document', None):
-        return await bot_app.send_message(message.chat.id, "⚠️ Reply to a video or document to get its MediaInfo.", reply_parameters=ReplyParameters(message_id=message.id))
+        msg = await bot_app.send_message(message.chat.id, "⚠️ Reply to a video or document to get its MediaInfo.", reply_parameters=ReplyParameters(message_id=message.id))
+        singleton_set(message.chat.id, "mediainfo", message.id, msg.id)
+        return
         
     msg = await bot_app.send_message(message.chat.id, "📝 Probing MediaInfo...", reply_parameters=ReplyParameters(message_id=message.id))
+    singleton_set(message.chat.id, "mediainfo", message.id, msg.id)
     chunk_path = f"/tmp/probe_{uuid.uuid4().hex}.mkv"
     try:
         active_client = user_app if user_app else bot_app
@@ -305,6 +338,7 @@ async def mediainfo_cmd(client, message):
         if os.path.exists(chunk_path):
             try: os.remove(chunk_path)
             except Exception as e: logger.debug(f"Failed to remove probe chunk: {e}")
+    spawn_temporary_task(auto_clean(msg, message))
 
 async def safe_edit(msg, text, **kwargs):
     if not msg or not getattr(msg, "id", None): 
@@ -688,40 +722,57 @@ async def generate_sample_background(client, target_message, status_msg):
 async def samplegen_cmd(client, message):
     if not is_sudo(message): 
         return await bot_app.send_message(message.chat.id, UNAUTH_MSG, reply_parameters=ReplyParameters(message_id=message.id))
+    await singleton_clear(message.chat.id, "samplegen")
     if AppState.task_state != TaskState.IDLE or not queue.empty(): 
-        return await bot_app.send_message(message.chat.id, Localisation.SAMPLE_BUSY, reply_parameters=ReplyParameters(message_id=message.id))
+        msg = await bot_app.send_message(message.chat.id, Localisation.SAMPLE_BUSY, reply_parameters=ReplyParameters(message_id=message.id))
+        singleton_set(message.chat.id, "samplegen", message.id, msg.id)
+        return
     if not message.reply_to_message: 
-        return await bot_app.send_message(message.chat.id, "⚠️ Please reply to a video to generate a sample.", reply_parameters=ReplyParameters(message_id=message.id))
+        msg = await bot_app.send_message(message.chat.id, "⚠️ Please reply to a video to generate a sample.", reply_parameters=ReplyParameters(message_id=message.id))
+        singleton_set(message.chat.id, "samplegen", message.id, msg.id)
+        return
     
     if getattr(message.reply_to_message, "audio", None) or getattr(message.reply_to_message, "voice", None):
         await send_log(f"⚠️ **Abuse Warning:** User @{message.from_user.username} tried to use /samplegen on an Audio file.")
-        return await bot_app.send_message(message.chat.id, "⚠️ `/samplegen` only works on Videos, not Audio files!", reply_parameters=ReplyParameters(message_id=message.id))
+        msg = await bot_app.send_message(message.chat.id, "⚠️ `/samplegen` only works on Videos, not Audio files!", reply_parameters=ReplyParameters(message_id=message.id))
+        singleton_set(message.chat.id, "samplegen", message.id, msg.id)
+        return
         
     if not getattr(message.reply_to_message, "video", None) and not getattr(message.reply_to_message, "document", None):
-        return await bot_app.send_message(message.chat.id, "⚠️ Please reply to a video or document to generate a sample.", reply_parameters=ReplyParameters(message_id=message.id))
+        msg = await bot_app.send_message(message.chat.id, "⚠️ Please reply to a video or document to generate a sample.", reply_parameters=ReplyParameters(message_id=message.id))
+        singleton_set(message.chat.id, "samplegen", message.id, msg.id)
+        return
         
     if getattr(message.reply_to_message, "document", None):
         mime = message.reply_to_message.document.mime_type
         if mime and not mime.startswith("video/"):
-            return await bot_app.send_message(message.chat.id, "⚠️ The replied document is not a valid video format! (e.g. zip/pdf)", reply_parameters=ReplyParameters(message_id=message.id))
+            msg = await bot_app.send_message(message.chat.id, "⚠️ The replied document is not a valid video format! (e.g. zip/pdf)", reply_parameters=ReplyParameters(message_id=message.id))
+            singleton_set(message.chat.id, "samplegen", message.id, msg.id)
+            return
     msg = await bot_app.send_message(message.chat.id, "⏳ **Initializing Fast Sample Generator...** 📡\n", reply_parameters=ReplyParameters(message_id=message.id))
+    singleton_set(message.chat.id, "samplegen", message.id, msg.id)
     spawn_temporary_task(generate_sample_background(client, message.reply_to_message, msg))
 
 @bot_app.on_message(filters.command("clearlocals"))
 async def clearlocals_cmd(client, message):
     if not is_sudo(message): 
         return await bot_app.send_message(message.chat.id, UNAUTH_MSG, reply_parameters=ReplyParameters(message_id=message.id))
+    await singleton_clear(message.chat.id, "clearlocals")
     try:
         freed = gc.collect()
-        await bot_app.send_message(message.chat.id, f"✅ **Garbage Collection Triggered!**\nFreed `{freed}` unused Python objects from memory.", reply_parameters=ReplyParameters(message_id=message.id))
+        msg = await bot_app.send_message(message.chat.id, f"✅ **Garbage Collection Triggered!**\nFreed `{freed}` unused Python objects from memory.", reply_parameters=ReplyParameters(message_id=message.id))
+        singleton_set(message.chat.id, "clearlocals", message.id, msg.id)
     except Exception as e:
-        await bot_app.send_message(message.chat.id, f"❌ **Failed to run GC:** {e}", reply_parameters=ReplyParameters(message_id=message.id))
+        msg = await bot_app.send_message(message.chat.id, f"❌ **Failed to run GC:** {e}", reply_parameters=ReplyParameters(message_id=message.id))
+        singleton_set(message.chat.id, "clearlocals", message.id, msg.id)
 
 @bot_app.on_message(filters.command("restart"))
 async def restart_cmd(client, message):
     if not is_sudo(message): 
         return await bot_app.send_message(message.chat.id, UNAUTH_MSG, reply_parameters=ReplyParameters(message_id=message.id))
+    await singleton_clear(message.chat.id, "restart")
     msg = await bot_app.send_message(message.chat.id, "🔄 **Restarting...**", reply_parameters=ReplyParameters(message_id=message.id))
+    singleton_set(message.chat.id, "restart", message.id, msg.id)
     
     if os.path.exists(".git"):
         try:
@@ -750,6 +801,7 @@ async def restart_cmd(client, message):
 async def cancel_all_cmd(client, message):
     if not is_owner(message): 
         return await bot_app.send_message(message.chat.id, UNAUTH_MSG, reply_parameters=ReplyParameters(message_id=message.id))
+    await singleton_clear(message.chat.id, "cancelall")
     
     while True:
         try:
@@ -770,39 +822,51 @@ async def cancel_all_cmd(client, message):
     LAST_SENT_TEXT.clear()
         
     msg = await bot_app.send_message(message.chat.id, "⚠️ **ALL TASKS CANCELLED AND QUEUE CLEARED.**", reply_parameters=ReplyParameters(message_id=message.id))
+    singleton_set(message.chat.id, "cancelall", message.id, msg.id)
     spawn_temporary_task(delete_message_later(msg, 30))
 
 @bot_app.on_message(filters.command("setthumbnail"))
 async def set_thumb(client, message):
     if not is_owner(message): 
         return await bot_app.send_message(message.chat.id, UNAUTH_MSG, reply_parameters=ReplyParameters(message_id=message.id))
+    await singleton_clear(message.chat.id, "setthumbnail")
     if not message.reply_to_message or not message.reply_to_message.photo: 
-        return await bot_app.send_message(message.chat.id, Localisation.INVALID_THUMB, reply_parameters=ReplyParameters(message_id=message.id))
+        msg = await bot_app.send_message(message.chat.id, Localisation.INVALID_THUMB, reply_parameters=ReplyParameters(message_id=message.id))
+        singleton_set(message.chat.id, "setthumbnail", message.id, msg.id)
+        return
     path = os.path.join(Config.THUMB_DIR, f"{message.from_user.id}.jpg")
     await message.reply_to_message.download(file_name=path)
     
-    await bot_app.send_message(message.chat.id, Localisation.THUMB_ADDED, reply_parameters=ReplyParameters(message_id=message.id))
+    msg = await bot_app.send_message(message.chat.id, Localisation.THUMB_ADDED, reply_parameters=ReplyParameters(message_id=message.id))
+    singleton_set(message.chat.id, "setthumbnail", message.id, msg.id)
 
 @bot_app.on_message(filters.command("delthumbnail"))
 async def del_thumb_cmd(client, message):
     if not is_owner(message): 
         return await bot_app.send_message(message.chat.id, UNAUTH_MSG, reply_parameters=ReplyParameters(message_id=message.id))
+    await singleton_clear(message.chat.id, "delthumbnail")
     path = os.path.join(Config.THUMB_DIR, f"{message.from_user.id}.jpg")
     if not os.path.exists(path): 
         msg = await bot_app.send_message(message.chat.id, "⚠️ You don't have a custom thumbnail set.", reply_parameters=ReplyParameters(message_id=message.id))
+        singleton_set(message.chat.id, "delthumbnail", message.id, msg.id)
         return spawn_temporary_task(delete_message_later(msg, 30))
         
     btn = InlineKeyboardMarkup([[InlineKeyboardButton("Yes ✅", callback_data="delthumb_yes", style=ButtonStyle.SUCCESS), InlineKeyboardButton("No ❌", callback_data="delthumb_no", style=ButtonStyle.DANGER)]])
     msg = await bot_app.send_message(message.chat.id, Localisation.THUMB_WARNING, reply_markup=btn, reply_parameters=ReplyParameters(message_id=message.id))
-    spawn_temporary_task(delete_message_later(msg, 30))
+    singleton_set(message.chat.id, "delthumbnail", message.id, msg.id)
+    return spawn_temporary_task(delete_message_later(msg, 30))
 
 @bot_app.on_message(filters.command("speedtest"))
 async def speedtest_cmd(client, message):
     if not is_owner(message): 
         return await bot_app.send_message(message.chat.id, UNAUTH_MSG, reply_parameters=ReplyParameters(message_id=message.id))
+    await singleton_clear(message.chat.id, "speedtest")
     if SPEEDTEST_LOCK.locked():
-        return await bot_app.send_message(message.chat.id, "⚠️ A speedtest is already running. Please wait...", reply_parameters=ReplyParameters(message_id=message.id))
-    msg = await bot_app.send_message(message.chat.id, "⏳ **Running Server Speedtest...**\n✨ 𝘛𝘩𝘪𝘴 𝘵𝘢𝘬𝘦𝘴 𝘢𝘣𝘰𝘶𝘵 20 𝘴𝘦𝘤𝘰𝘯𝘥𝘴 ✨", reply_parameters=ReplyParameters(message_id=message.id))
+        msg = await bot_app.send_message(message.chat.id, "⚠️ A speedtest is already running. Please wait...", reply_parameters=ReplyParameters(message_id=message.id))
+        singleton_set(message.chat.id, "speedtest", message.id, msg.id)
+        return
+    msg = await bot_app.send_message(message.chat.id, "⏳ **Running Server Speedtest...**\n✨ 𝘛𝘩𝘪𝘴 𝘵𝘢𝘬𝘦s 𝘢𝘣𝘰𝘶𝘵 20 𝘴𝘦𝘤𝘰𝘯𝘥𝘴 ✨", reply_parameters=ReplyParameters(message_id=message.id))
+    singleton_set(message.chat.id, "speedtest", message.id, msg.id)
     try:
         async with SPEEDTEST_LOCK:
             res = await asyncio.to_thread(run_speedtest)
@@ -842,9 +906,11 @@ async def sh_handler(client, message):
     if not is_owner(message): 
         return await bot_app.send_message(message.chat.id, UNAUTH_MSG, reply_parameters=ReplyParameters(message_id=message.id))
     if len(message.text.split()) < 2: return
+    await singleton_clear(message.chat.id, "exec")
     
     cmd = message.text.split(maxsplit=1)[1]
     msg = await bot_app.send_message(message.chat.id, "📟 <b>Terminal:</b> <code>Processing...</code>", reply_parameters=ReplyParameters(message_id=message.id))
+    set_cmd(message.chat.id, "exec", message.id, msg.id)
     
     try:
         process = await asyncio.create_subprocess_shell(
@@ -884,8 +950,10 @@ async def eval_handler(client, message):
     if not is_owner(message): 
         return await bot_app.send_message(message.chat.id, UNAUTH_MSG, reply_parameters=ReplyParameters(message_id=message.id))
     if not message.text or len(message.text.split()) < 2: return
+    await singleton_clear(message.chat.id, "eval")
     cmd = message.text.split(maxsplit=1)[1]
     msg = await bot_app.send_message(message.chat.id, "Processing...", reply_parameters=ReplyParameters(message_id=message.id))
+    set_cmd(message.chat.id, "eval", message.id, msg.id)
     
     old_stderr = sys.stderr
     old_stdout = sys.stdout
@@ -929,6 +997,7 @@ async def eval_handler(client, message):
 async def broadcast_cmd(client, message):
     if not is_owner(message): 
         return await bot_app.send_message(message.chat.id, UNAUTH_MSG, reply_parameters=ReplyParameters(message_id=message.id))
+    await singleton_clear(message.chat.id, "broadcast")
     if len(message.command) < 2: 
         return await bot_app.send_message(message.chat.id, "⚠️ Usage: `/broadcast Your message here`", reply_parameters=ReplyParameters(message_id=message.id))
     
@@ -962,18 +1031,21 @@ async def broadcast_cmd(client, message):
             failed += 1
             
     msg = await bot_app.send_message(message.chat.id, f"✅ **Broadcast Complete!**\n\n🟢 **Success:** `{success}`\n🔴 **Failed:** `{failed}`", reply_parameters=ReplyParameters(message_id=message.id))
+    singleton_set(message.chat.id, "broadcast", message.id, msg.id)
     spawn_temporary_task(delete_message_later(msg, 30))
 
 @bot_app.on_message(filters.command("bsetting"))
 async def bsetting_cmd(client, message):
     if not is_owner(message): 
         return await bot_app.send_message(message.chat.id, UNAUTH_MSG, reply_parameters=ReplyParameters(message_id=message.id))
+    await singleton_clear(message.chat.id, "bsetting")
     help_text = (
         "**⚙️ Bot Settings Menu**\n"
         "Click a variable below to change its value interactively.\n"
         "✨ 𝘊𝘰𝘳𝘦 𝘴𝘺𝘴𝘵𝘦𝘮 𝘤𝘩𝘢𝘯𝘨𝘦𝘴 𝘳𝘦𝘲𝘶𝘪𝘳𝘦 𝘢 /𝘳𝘦𝘴𝘵𝘢𝘳𝘵 𝘵𝘰 𝘵𝘢𝘬𝘦 𝘧𝘶𝘭𝘭 𝘦𝘧𝘧𝘦𝘤𝘵 ✨"
     )
-    await bot_app.send_message(message.chat.id, help_text, reply_markup=get_bsetting_menu(), reply_parameters=ReplyParameters(message_id=message.id))
+    msg = await bot_app.send_message(message.chat.id, help_text, reply_markup=get_bsetting_menu(), reply_parameters=ReplyParameters(message_id=message.id))
+    singleton_set(message.chat.id, "bsetting", message.id, msg.id)
 
 @bot_app.on_message(filters.text, group=1)
 async def bsetting_input_catcher(client, message):
