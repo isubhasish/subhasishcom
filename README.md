@@ -2,7 +2,7 @@
 
 A high-performance, modular Telegram Bot designed to securely download, compress, and upload massive video files directly on an Oracle Always Free VPS. 
 
-Built with advanced FFmpeg integration, `pyrofork` MTProto architecture, and a bulletproof Dockerized environment. **100% DMCA Safe.**
+Built with advanced FFmpeg integration, `kurigram` MTProto architecture, and a bulletproof Dockerized environment. **100% DMCA Safe.**
 
 ---
 
@@ -177,10 +177,10 @@ samplegen - ⚠️ Generate a random 30sec preview sample [Owner/Sudo]
 setthumbnail - Reply to an image to save your custom thumbnail
 delthumbnail - Safely delete your custom thumbnail
 bsetting - ⚠️ Change Bot Config values live [Owner]
-exec - ⚠️ Execution [Owner/Sudo Only]
-stop - ⚠️ Stop The Current Task [Owner/Sudo Only]
+exec - ⚠️ Execution [Owner Only]
+eval - ⚠️ Evaluation [Owner Only]
 cancel - ⚠️ Cancel all tasks [Owner/Sudo Only]
-cancelall - ⚠️ Cancel all active and queued tasks [Owner/Sudo]
+cancelall - ⚠️ Cancel all active and queued tasks [Owner]
 speedtest - ⚠️ Test the Server's Download/Upload speed [Owner/Sudo]
 broadcast - ⚠️ Send a message to all authorized users [Owner]
 log - ⚠️ Get the Bot Log [Owner/Sudo Only]

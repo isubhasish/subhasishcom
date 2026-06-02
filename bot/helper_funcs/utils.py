@@ -163,11 +163,11 @@ def format_mediainfo_output(raw_info: str, file_name: str, size_str: str) -> lis
     current_pre = ""
     for line in raw_info.split('\n'):
         clean_line = line.strip()
-        if clean_line in ["General", "Video", "Text", "Menu"] or clean_line.startswith("Audio"):
+        if clean_line == "General" or clean_line.startswith(("Video", "Audio", "Text", "Menu")):
             if current_pre: 
                 content_json.append({"tag": "pre", "children": [current_pre]})
                 current_pre = ""
-            icon = "📄" if clean_line == "General" else "🎬" if clean_line == "Video" else "💬" if clean_line == "Text" else "📑" if clean_line == "Menu" else "🔊"
+            icon = "📄" if clean_line == "General" else "🎬" if clean_line.startswith("Video") else "💬" if clean_line.startswith("Text") else "📑" if clean_line.startswith("Menu") else "🔊"
             content_json.append({"tag": "h3", "children": [f"{icon} {clean_line}"]})
         elif line.strip(): 
             current_pre += line + "\n"
