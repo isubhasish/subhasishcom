@@ -1,7 +1,7 @@
 services:
   bot:
     build: .
-    container_name: subhasish_compressor
+    container_name: encoder
     restart: unless-stopped
     stop_grace_period: 30s
     volumes:
