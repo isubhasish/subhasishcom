@@ -23,11 +23,14 @@ def get_idle_text():
     sent, recv = get_network_io()
     free_disk_gb = round(psutil.disk_usage('/').free / (1024**3), 2)
     uptime_str = get_readable_time((time.time() - START_TIME)*1000)
+    merge_sessions_count = len(AppState.merge_sessions)
+    merge_text = f"**🔄 Active Merge Sessions:** {merge_sessions_count}\n\n" if merge_sessions_count > 0 else ""
     
     return (
         f"🌐 <b><u>Bᴏᴛ Sᴛᴀᴛɪsᴛɪᴄs</u></b> 🌐\n\n"
         f"**Status:** Idle\n\n"
         f"**📥 Files in Queue:** {queue.qsize()}\n\n"
+        f"{merge_text}"
         f"🔰 <b><u>Hardware Info:</u></b> 🔰\n"
         f"**CPU:** {cpu}% | **Free:** {free_disk_gb}GB ({100-disk}%)\n"
         f"**In:** {humanbytes(recv)} | **Out:** {humanbytes(sent)}\n"

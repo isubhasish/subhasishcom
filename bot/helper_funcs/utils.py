@@ -19,6 +19,7 @@ class TaskState:
     UPLOADING = "Uploading"
     CANCELLING = "Cancelling"
     SAMPLEGEN = "Generating Sample"
+    MERGING = "Merging"
 
 class AppState:
     current_process = None
@@ -35,6 +36,7 @@ class AppState:
     status_snapshot = ""
     pending_tasks = {}
     awaiting_index = {}
+    merge_sessions = {}
     bot_username = "Bot"
     bsetting_state = {}
     is_premium = False

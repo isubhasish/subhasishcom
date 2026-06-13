@@ -771,12 +771,18 @@ async def restart_cmd(client, message):
         json.dump({"chat_id": msg.chat.id, "message_id": msg.id}, f)
         f.flush()
         os.fsync(f.fileno())
+# 🛑 ZOMBIE PREVENTION: Kill all heavy child processes before os.execl
+    AppState.cancel_task = True
+    await kill_running_process()
+    for proc_name in ["ffmpeg", "ffprobe", "mkvmerge"]:
+        try: p = await asyncio.create_subprocess_exec("pkill", "-9", "-f", proc_name, stderr=asyncio.subprocess.DEVNULL); await p.wait()
+        except Exception: pass
+
     os.execl(sys.executable, sys.executable, "-m", "bot")
 
 @bot_app.on_message(filters.command("cancelall"))
 async def cancel_all_cmd(client, message):
-    if not is_owner(message): 
-        return await bot_app.send_message(message.chat.id, UNAUTH_MSG, reply_parameters=ReplyParameters(message_id=message.id))
+    if not is_owner(message): return await bot_app.send_message(message.chat.id, UNAUTH_MSG, reply_parameters=ReplyParameters(message_id=message.id))
     
     is_idle = (AppState.task_state == TaskState.IDLE and queue.empty())
     while True:
@@ -789,7 +795,8 @@ async def cancel_all_cmd(client, message):
     
     AppState.cancel_task = True 
     await kill_running_process()
-    
+    AppState.merge_sessions.clear()
+
     if AppState.active_status_msg:
         try: await AppState.active_status_msg.delete()
         except Exception as e: logger.debug(f"cancelall status deletion failed: {e}")
@@ -871,7 +878,6 @@ async def speedtest_cmd(client, message):
         await msg.edit_text(f"❌ **Speedtest Failed:** {e}")
 
 def run_speedtest():
-    # 1. Auto-grab the Application Name and Version dynamically
     app_name = "Ookla Speedtest CLI"
     app_version = "Unknown"
     try:
@@ -882,11 +888,9 @@ def run_speedtest():
         match = re.search(r"^(.*?)\s+([\d\.]+)", v_text)
         if match: app_name, app_version = match.group(1).strip(), match.group(2).strip()
     except Exception: pass
-    # 2. Run the actual Speedtest
     cmd = ["speedtest", "--accept-license", "--accept-gdpr", "-f", "json"]
     process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     try:
-        # 60-second timeout prevents deadlocks if the Ookla server hangs
         stdout, stderr = process.communicate(timeout=60)
     except subprocess.TimeoutExpired:
         process.kill()
@@ -895,9 +899,7 @@ def run_speedtest():
 
     if process.returncode != 0: raise Exception(stderr.decode('utf-8').strip() or "Speedtest CLI failed.")
     res = json.loads(stdout.decode('utf-8'))
-    # 🛡️ SECURITY: PURGE DANGEROUS DATA
     res.pop('result', None); res.pop('interface', None); res.pop('isp', None)
-    # Inject the dynamically grabbed version info into the result dictionary
     res['app_name'] = app_name; res['app_version'] = app_version
     return res
 

@@ -213,6 +213,9 @@ async def worker():
     active_client = user_app if user_app else bot_app
     
     while True:
+        if AppState.task_state in [TaskState.MERGING, TaskState.SAMPLEGEN]:
+            await asyncio.sleep(5)
+            continue
         try:
             task = await asyncio.wait_for(queue.get(), timeout=30)
         except asyncio.TimeoutError:
@@ -311,21 +314,16 @@ async def worker():
                         except: pass
                     duration_sec = 0
 
-            cmd = [
-                "ffmpeg", "-hide_banner", "-loglevel", "error", "-nostats", "-nostdin", "-i", file_path
-            ] + map_args + [
-                "-c:v", str(config_data.get("CODEC", "libx265")), 
-                "-crf", crf_val, 
-                "-preset", str(config_data.get("PRESET", "fast")),
-                "-filter:v:0", vf_string, 
-                "-c:a", "libopus", 
-                "-b:a", str(config_data.get("AUDIO_BITRATE", "96k")), 
-                "-c:s", "copy",
-                "-max_muxing_queue_size", "1024",
-                "-progress", "pipe:1",
-                "-y", out
-            ]
-            
+            current_utc = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+            # Block 1: Input & Stream Mapping
+            cmd = ["ffmpeg", "-hide_banner", "-loglevel", "error", "-nostats", "-nostdin", "-i", file_path] + map_args
+            # Block 2: Video Filters & Encoding
+            cmd += ["-filter:v:0", vf_string, "-c:v", str(config_data.get("CODEC", "libx265")), "-crf", crf_val, "-preset", str(config_data.get("PRESET", "fast")), "-pix_fmt", "yuv420p", "-b:v", "150k"]
+            # Block 3: Audio & Subtitle Encoding
+            cmd += ["-c:a", "libopus", "-b:a", str(config_data.get("AUDIO_BITRATE", "96k")), "-c:s", "copy"]
+            # Block 4: Metadata, Muxing Rules, & Output File
+            cmd += ["-map_metadata", "-1", "-metadata", f"creation_time={current_utc}", "-write_crc32", "0", "-max_muxing_queue_size", "1024", "-progress", "pipe:1", "-y", out]
+
             encode_start_time = time.time()
             stderr_lines = []
             async def drain_stderr(proc):
@@ -589,14 +587,15 @@ async def worker():
                 if os.path.exists(f): os.remove(f)
             if actual_thumb and actual_thumb != custom_thumb and actual_thumb != default_thumb and os.path.exists(actual_thumb): 
                 os.remove(actual_thumb)
-            
-            AppState.task_state = TaskState.IDLE
-            AppState.cancel_task = False
-            AppState.active_file_name = "None"
-            AppState.active_origin_msg = None
-            AppState.active_status_msg = None
-            AppState.status_snapshot = ""
-            AppState.task_kind = "compress"
-            if queue.empty(): AppState.task_state = TaskState.IDLE
-            
+
+            async with AppState.state_lock:
+                AppState.task_state = TaskState.IDLE
+                AppState.cancel_task = False
+                AppState.active_file_name = "None"
+                AppState.active_origin_msg = None
+                AppState.active_status_msg = None
+                AppState.status_snapshot = ""
+                AppState.task_kind = "compress"
+                if queue.empty(): AppState.task_state = TaskState.IDLE
+
             queue.task_done()

@@ -68,6 +68,10 @@ async def incoming_media(client, message):
                     "⚠️ **Invalid File:** Please send a valid video file.", 
                     reply_parameters=ReplyParameters(message_id=message.id)
                 )
+    # 🛑 MERGE INTERCEPTOR
+    if message.chat.id in AppState.merge_sessions:
+        from bot.plugins.merge_handler import handle_merge_input
+        return await handle_merge_input(client, message)
 
     file_name = getattr(media, "file_name", "video.mkv")
     tid = str(message.id) + str(message.chat.id)
@@ -79,7 +83,8 @@ async def incoming_media(client, message):
 
     btn = InlineKeyboardMarkup([
         [InlineKeyboardButton("▶️ ᴄᴏᴍᴘʀᴇss ▶️", callback_data=f"panel_all_{tid}", style=ButtonStyle.SUCCESS), InlineKeyboardButton("🎞 sᴇʟᴇᴄᴛ sᴛʀᴇᴀᴍ 🎞", callback_data=f"panel_select_{tid}", style=ButtonStyle.PRIMARY)],
-        [InlineKeyboardButton("📊 ᴍᴇᴅɪᴀɪɴғᴏ 📊", callback_data=f"panel_info_{tid}", style=ButtonStyle.PRIMARY), InlineKeyboardButton("❌ ᴄʟᴏsᴇ ❌", callback_data=f"panel_close_{tid}", style=ButtonStyle.DANGER)]
+        [InlineKeyboardButton("✝️ ᴍᴇʀɢᴇ ᴠɪᴅᴇᴏ ✝️", callback_data=f"panel_merge_{tid}", style=ButtonStyle.PRIMARY), InlineKeyboardButton("📊 ᴍᴇᴅɪᴀɪɴғᴏ 📊", callback_data=f"panel_info_{tid}", style=ButtonStyle.PRIMARY)],
+        [InlineKeyboardButton("❌ ᴄʟᴏsᴇ ❌", callback_data=f"panel_close_{tid}", style=ButtonStyle.DANGER)]
     ])
     
     await bot_app.send_message(

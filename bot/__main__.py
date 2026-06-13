@@ -14,6 +14,7 @@ import bot.plugins.commands
 import bot.plugins.call_back_button_handler
 import bot.plugins.incoming_message_fn
 import bot.plugins.status_message_fn
+import bot.plugins.merge_handler
 
 async def fetch_default_thumbnail() -> None:
     thumb_url = "https://telegra.ph/file/5c4635e173e7407694a63.jpg"
